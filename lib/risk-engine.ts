@@ -15,7 +15,8 @@ export const riskCategories: RiskCategory[] = [
   'travelDisruption'
 ];
 
-export const riskCategoryLabels: Record<RiskCategory, string> = {
+export const riskCategoryLabels: Record<string, string> = {
+  overall: 'Overall',
   security: 'Security',
   crime: 'Crime',
   political: 'Political',
