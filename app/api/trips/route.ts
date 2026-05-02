@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getDemoSession, requirePaid } from '@/lib/auth';
+import { getSession, requirePaid } from '@/lib/auth';
 import { store } from '@/lib/store';
 
 const travellerSchema = z.object({
@@ -26,16 +26,16 @@ const tripSchema = z.object({
 });
 
 export async function GET(request: Request) {
-  const user = getDemoSession(request.headers);
-  return NextResponse.json({ data: store.listTrips(user.id) });
+  const user = getSession(request.headers);
+  return NextResponse.json({ data: await store.listTrips(user.id) });
 }
 
 export async function POST(request: Request) {
-  const user = getDemoSession(request.headers);
+  const user = getSession(request.headers);
   const paid = requirePaid(user);
   if (!paid.ok) return NextResponse.json({ error: paid.message }, { status: paid.status });
   const parsed = tripSchema.safeParse(await request.json());
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  const trip = store.createTrip({ ...parsed.data, userId: user.id, paid: true });
+  const trip = await store.createTrip({ ...parsed.data, userId: user.id, paid: true });
   return NextResponse.json({ data: trip }, { status: 201 });
 }
