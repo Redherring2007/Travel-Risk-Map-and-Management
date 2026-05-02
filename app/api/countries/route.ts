@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { countries } from '@/lib/data';
+import { restCountriesProvider } from '@/lib/provider-adapters';
 
 export async function GET() {
-  return NextResponse.json({ data: countries, mode: 'demo-provider-ready' });
+  const result = await restCountriesProvider.getCountries();
+  return NextResponse.json({ data: result.data, mode: result.status, source: result.source, notes: result.notes });
 }
