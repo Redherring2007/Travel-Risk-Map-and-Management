@@ -10,13 +10,13 @@ export type ProviderDescriptor = {
 };
 
 function statusFor(required: string[]): ProviderStatus {
-  if (required.length === 0) return 'demo';
+  if (required.length === 0) return 'ready';
   return required.every((key) => Boolean(process.env[key])) ? 'ready' : 'not_configured';
 }
 
 export const providers: ProviderDescriptor[] = [
-  { key: 'rest-countries', name: 'REST Countries', category: 'country_baseline', envVars: [], status: 'demo', notes: 'Used for baseline fields when connected through provider jobs.' },
-  { key: 'world-bank', name: 'World Bank / UN indicators', category: 'country_baseline', envVars: [], status: 'demo', notes: 'Adapter-ready for economic and population indicators.' },
+  { key: 'rest-countries', name: 'REST Countries', category: 'country_baseline', envVars: [], status: 'ready', notes: 'Public no-key baseline country fields. Falls back to local demo if unreachable.' },
+  { key: 'world-bank', name: 'World Bank / UN indicators', category: 'country_baseline', envVars: [], status: 'ready', notes: 'Public no-key adapter-ready source for indicators.' },
   { key: 'cia-factbook', name: 'CIA Factbook-style country data', category: 'country_baseline', envVars: ['CIA_FACTBOOK_SOURCE_URL'], status: statusFor(['CIA_FACTBOOK_SOURCE_URL']), notes: 'Configure source URL or internal ingestion job.' },
   { key: 'uk-fcdo', name: 'UK FCDO Travel Advice', category: 'travel_advice', envVars: ['UK_FCDO_API_URL'], status: statusFor(['UK_FCDO_API_URL']), notes: 'Connect advisory feed or scraper endpoint.' },
   { key: 'us-state', name: 'US State Department Advisories', category: 'travel_advice', envVars: ['US_STATE_ADVISORY_API_URL'], status: statusFor(['US_STATE_ADVISORY_API_URL']), notes: 'Connect official advisory source.' },
