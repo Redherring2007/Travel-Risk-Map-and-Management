@@ -2,7 +2,7 @@ import { store } from '@/lib/store';
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const report = store.getReport(id);
+  const report = await store.getReport(id);
   if (!report) return new Response('Report not found', { status: 404 });
   return new Response(report.markdown, {
     headers: {
