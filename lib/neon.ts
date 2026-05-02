@@ -8,11 +8,11 @@ export function isNeonConfigured() {
   return Boolean(getDatabaseUrl());
 }
 
-export async function query<T = unknown>(sql: string, params: unknown[] = []): Promise<T[]> {
+export async function query<T = unknown>(sqlText: string, params: unknown[] = []): Promise<T[]> {
   const databaseUrl = getDatabaseUrl();
   if (!databaseUrl) {
     throw new Error('Neon is not configured. Set DATABASE_URL and run migrations before enabling persistent mode.');
   }
-  const db = neon(databaseUrl);
-  return (await db.query(sql, params)) as T[];
+  const sql = neon(databaseUrl);
+  return (await sql(sqlText, params)) as T[];
 }
