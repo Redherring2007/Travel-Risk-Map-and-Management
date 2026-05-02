@@ -30,6 +30,7 @@ checks.push(['country detail', () => request('/api/countries/KE')]);
 checks.push(['city detail', () => request('/api/cities/nairobi-ke')]);
 checks.push(['advisories', () => request('/api/advisories')]);
 checks.push(['risk events', () => request('/api/events')]);
+checks.push(['auth session', () => request('/api/auth/session', { headers: { 'x-demo-paid': 'true' } })]);
 checks.push(['free paid block', async () => {
   const response = await fetch(`${base}/api/trips`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-demo-paid': 'false' }, body: JSON.stringify(tripPayload) });
   if (response.status !== 402) throw new Error(`expected 402, got ${response.status}`);
@@ -38,11 +39,15 @@ checks.push(['paid trip flow', async () => {
   const trip = await request('/api/trips', { method: 'POST', headers: paidHeaders, body: JSON.stringify(tripPayload) });
   const tripId = trip.data.id;
   await request(`/api/trips/${tripId}`, { method: 'PATCH', headers: paidHeaders, body: JSON.stringify({ accommodation: 'Updated hotel' }) });
-  const doc = await request(`/api/trips/${tripId}/documents`, { method: 'POST', headers: paidHeaders, body: JSON.stringify({ type: 'Passport', fileName: 'passport.pdf', mimeType: 'application/pdf', size: 1234 }) });
+  const upload = await request('/api/storage/upload-url', { method: 'POST', headers: paidHeaders, body: JSON.stringify({ tripId, fileName: 'passport.pdf', contentType: 'application/pdf' }) });
+  const doc = await request(`/api/trips/${tripId}/documents`, { method: 'POST', headers: paidHeaders, body: JSON.stringify({ type: 'Passport', fileName: 'passport.pdf', mimeType: 'application/pdf', size: 1234, storageKey: upload.key }) });
   await request(`/api/trips/${tripId}/documents/${doc.data.id}`, { headers: { 'x-demo-paid': 'true' } });
+  await request('/api/storage/download-url', { method: 'POST', headers: paidHeaders, body: JSON.stringify({ key: doc.data.storageKey }) });
   const report = await request('/api/reports/generate', { method: 'POST', headers: paidHeaders, body: JSON.stringify({ tripId }) });
   await request(`/api/reports/${report.data.id}/download`);
 }]);
+checks.push(['billing checkout placeholder', () => request('/api/billing/checkout', { method: 'POST', headers: paidHeaders })]);
+checks.push(['billing webhook placeholder', () => request('/api/billing/webhook', { method: 'POST', headers: paidHeaders, body: JSON.stringify({ userId: '00000000-0000-4000-8000-000000000002' }) })]);
 checks.push(['admin approve alert', () => request('/api/admin/alerts/a3/approve', { method: 'POST', headers: adminHeaders })]);
 checks.push(['admin override risk', () => request('/api/admin/risk-score', { method: 'POST', headers: adminHeaders, body: JSON.stringify({ countryIso2: 'KE', category: 'security', value: 60 }) })]);
 
