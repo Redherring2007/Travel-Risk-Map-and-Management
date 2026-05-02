@@ -1,4 +1,4 @@
-import type { Confidence, RiskCategory, RiskLevel, RiskScore } from './types';
+import type { Confidence, DataStatus, RiskCategory, RiskLevel, RiskScore } from './types';
 
 export const riskCategories: RiskCategory[] = [
   'security',
@@ -15,6 +15,21 @@ export const riskCategories: RiskCategory[] = [
   'travelDisruption'
 ];
 
+export const riskCategoryLabels: Record<RiskCategory, string> = {
+  security: 'Security',
+  crime: 'Crime',
+  political: 'Political',
+  terrorismConflict: 'Terrorism/conflict',
+  kidnapExtortion: 'Kidnap',
+  health: 'Health',
+  medical: 'Medical',
+  naturalDisaster: 'Natural hazards',
+  transport: 'Transport',
+  infrastructure: 'Infrastructure',
+  legalCultural: 'Legal/cultural',
+  travelDisruption: 'Travel disruption'
+};
+
 export function riskLevel(value: number): RiskLevel {
   if (value >= 75) return 'Critical';
   if (value >= 50) return 'High';
@@ -30,7 +45,7 @@ export function riskMeaning(value: number): string {
   return 'Generally stable operating environment; standard precautions are usually sufficient.';
 }
 
-export function score(category: RiskCategory | 'overall', value: number, sources: string[], confidence: Confidence = 'Medium'): RiskScore {
+export function score(category: RiskCategory | 'overall', value: number, sources: string[], confidence: Confidence = 'Medium', sourceStatus: DataStatus = 'demo'): RiskScore {
   const bounded = Math.max(0, Math.min(100, Math.round(value)));
   return {
     category,
@@ -39,14 +54,16 @@ export function score(category: RiskCategory | 'overall', value: number, sources
     meaning: riskMeaning(bounded),
     confidence,
     lastUpdated: new Date().toISOString(),
-    sources
+    sources,
+    sourceStatus
   };
 }
 
 export function overallRisk(scores: RiskScore[]): RiskScore {
   const categories = scores.filter((item) => item.category !== 'overall');
   const weighted = categories.reduce((total, item) => total + item.value, 0) / Math.max(categories.length, 1);
-  return score('overall', weighted, Array.from(new Set(categories.flatMap((item) => item.sources))), 'Medium');
+  const statuses = new Set(categories.map((item) => item.sourceStatus));
+  return score('overall', weighted, Array.from(new Set(categories.flatMap((item) => item.sources))), 'Medium', statuses.has('live') ? 'live' : 'demo');
 }
 
 export function recommendationFromScore(value: number): 'Go' | 'Go With Caution' | 'Avoid' {
