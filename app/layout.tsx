@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Aegis Travel Intelligence',
+  title: 'Atlas Insight Risk Map and Travel Management',
   description: 'Travel risk management and security intelligence platform'
 };
 
