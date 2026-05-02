@@ -3,18 +3,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { geoEqualEarth, geoPath } from 'd3-geo';
 import { feature } from 'topojson-client';
-import { AlertTriangle, BarChart3, Bell, CircleHelp, FileText, Globe2, Home, MapPin, Plane, Search, Settings, Shield, Trash2, Upload, UserRound } from 'lucide-react';
+import { AlertTriangle, BarChart3, Bell, CircleHelp, FileText, Globe2, Home, MapPin, Plane, Search, Settings, Shield, Trash2, Upload, UserRound, type LucideIcon } from 'lucide-react';
 import { alerts, cities, countries } from '@/lib/data';
 import { missingDocuments } from '@/lib/report';
 import { riskCategoryLabels } from '@/lib/risk-engine';
-import type { Alert, CityProfile, CountryProfile, RiskLevel, Trip, TripDocument, TripReport } from '@/lib/types';
+import type { CityProfile, CountryProfile, RiskLevel, Trip, TripDocument, TripReport } from '@/lib/types';
 
 type WorldFeature = { type: 'Feature'; id?: string | number; properties: { name: string }; geometry: unknown };
 type FeatureCollection = { features: WorldFeature[] };
 
 type ViewName = 'Dashboard' | 'Risk Map' | 'Countries' | 'Cities' | 'Alerts' | 'Itineraries' | 'Reports' | 'Travel Feed' | 'Support' | 'Settings';
 
-const nav: Array<[ViewName, typeof Home]> = [
+const nav: Array<[ViewName, LucideIcon]> = [
   ['Dashboard', Home], ['Risk Map', Globe2], ['Countries', MapPin], ['Cities', Search], ['Alerts', Bell], ['Itineraries', Plane], ['Reports', FileText], ['Travel Feed', BarChart3], ['Support', CircleHelp], ['Settings', Settings]
 ];
 
