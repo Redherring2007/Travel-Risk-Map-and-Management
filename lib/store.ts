@@ -31,18 +31,21 @@ export const store = {
     documents.delete(id);
     return trips.delete(id);
   },
-  addDocument(input: Omit<TripDocument, 'id' | 'uploadedAt'>) {
-    const doc: TripDocument = { ...input, id: randomUUID(), uploadedAt: new Date().toISOString() };
+  addDocument(input: Omit<TripDocument, 'id' | 'uploadedAt' | 'auditStatus'>) {
+    const doc: TripDocument = { ...input, id: randomUUID(), uploadedAt: new Date().toISOString(), auditStatus: 'active' };
     const list = documents.get(doc.tripId) ?? [];
     documents.set(doc.tripId, [...list, doc]);
     return doc;
   },
   listDocuments(tripId: string) {
-    return documents.get(tripId) ?? [];
+    return (documents.get(tripId) ?? []).filter((doc) => doc.auditStatus === 'active');
+  },
+  getDocument(tripId: string, documentId: string) {
+    return (documents.get(tripId) ?? []).find((doc) => doc.id === documentId && doc.auditStatus === 'active') ?? null;
   },
   deleteDocument(tripId: string, documentId: string) {
     const list = documents.get(tripId) ?? [];
-    documents.set(tripId, list.filter((doc) => doc.id !== documentId));
+    documents.set(tripId, list.map((doc) => doc.id === documentId ? { ...doc, auditStatus: 'deleted' } : doc));
     return true;
   },
   saveReport(report: TripReport) {
