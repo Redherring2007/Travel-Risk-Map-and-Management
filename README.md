@@ -9,14 +9,16 @@ Atlas Insight Risk Map and Travel Management is a portable Travel Risk Managemen
 - Full Risk Map view with interactive real 2D world map, country risk colouring, country hover/click, city markers, country search, and global city search.
 - Country intelligence profiles with risk scoring, baseline data, advisories, current alerts, and source/demo status.
 - City intelligence profiles for important/high-risk cities.
-- Demo account access with free/client tier switching.
+- Isolated auth adapter with demo headers today and stable route contracts for production auth.
 - Paid-gated trip creation and update API.
 - Traveller profile capture.
-- Document hub storing metadata and S3-ready storage keys. Neon stores metadata only; S3-compatible storage stores files in production.
+- Neon-backed trip, document metadata, and report persistence when `DATABASE_URL` is configured, with explicit demo fallback when it is not.
+- S3/R2/MinIO-ready signed upload and download URL endpoints.
 - Tailored travel risk report generation and markdown download.
 - User alerts and admin approve/override APIs.
-- Provider adapter contracts with demo fallback.
+- Provider adapter contracts with demo fallback and live REST Countries baseline enrichment.
 - Neon/Postgres migration for production schema.
+- Stripe checkout/webhook placeholders showing the access-tier update flow.
 
 ## Tech Stack
 
@@ -26,7 +28,7 @@ Atlas Insight Risk Map and Travel Management is a portable Travel Risk Managemen
 - d3-geo + topojson-client for the world map
 - Zod for request validation
 - Neon Postgres adapter
-- S3-compatible storage package
+- S3-compatible storage package and presigned URL support
 - Playwright tests
 
 ## Environment Variables
@@ -87,6 +89,7 @@ With the dev server running:
 ```bash
 npm run verify:mvp
 npm run test:e2e
+npm run build
 ```
 
 ## Full MVP Test Journey
@@ -100,22 +103,21 @@ npm run test:e2e
 7. Try `Create Trip` as a free user and confirm paid gating blocks it.
 8. Click `Sign up / log in as client`.
 9. Create a trip.
-10. Add document metadata from the Document Hub.
-11. View and delete document metadata if needed.
-12. Generate the tailored risk report.
-13. Download the report.
-14. Open `Reports` to re-open the latest report.
-15. Open `Alerts` and `Travel Feed` for global/trip-relevant alert context.
+10. Request a signed upload URL if S3/R2/MinIO is configured.
+11. Add document metadata from the Document Hub.
+12. View and delete document metadata if needed.
+13. Generate the tailored risk report.
+14. Download the report.
+15. Open `Reports` to re-open the latest report.
+16. Open `Alerts` and `Travel Feed` for global/trip-relevant alert context.
 
 ## Production Notes
 
-This MVP is source-ready and commercially structured, but it still uses demo in-memory storage for local interactions. For production:
+The app is a hardened working MVP, not fully production-ready yet. Before commercial launch:
 
-- Replace demo auth with a real auth provider using `users` and `subscriptions` tables.
-- Connect Stripe checkout and webhooks.
-- Persist trips, documents, reports, alerts, approvals, and overrides to Neon.
-- Store actual document bytes in S3-compatible storage and keep only metadata in Neon.
-- Add signed URL generation for document view/download.
-- Connect provider ingestion jobs for country baselines, advisories, live incidents, weather, health, aviation, and geocoding.
-- Add row-level authorization and audit logging around all paid/admin endpoints.
-- Deploy as a Next.js Node service on a VPS behind Nginx/Caddy, or to a managed Node host.
+- Replace demo-header auth with a real auth provider in `lib/auth.ts`.
+- Replace Stripe placeholders with real Checkout session creation and signed webhook verification.
+- Apply row-level authorization to every Neon-backed object.
+- Wire provider ingestion jobs for FCDO, US State, Canada, Australia, GDELT/news, weather/disaster, health, aviation, and geocoding.
+- Add scheduled ingestion, moderation queue operations, and richer admin screens.
+- Add observability, backups, rate limiting, audit review, and VPS deployment hardening.
