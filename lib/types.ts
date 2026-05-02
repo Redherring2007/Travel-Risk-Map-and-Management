@@ -1,5 +1,6 @@
 export type RiskLevel = 'Low' | 'Moderate' | 'High' | 'Critical';
 export type Confidence = 'Low' | 'Medium' | 'High';
+export type DataStatus = 'demo' | 'live' | 'limited' | 'manual_override';
 
 export type RiskCategory =
   | 'security'
@@ -23,6 +24,7 @@ export type RiskScore = {
   confidence: Confidence;
   lastUpdated: string;
   sources: string[];
+  sourceStatus: DataStatus;
 };
 
 export type CountryProfile = {
@@ -81,6 +83,8 @@ export type Alert = {
   recommendedAction: string;
   linkedTripId?: string;
   approved?: boolean;
+  lat?: number;
+  lon?: number;
 };
 
 export type TravellerProfile = {
@@ -106,12 +110,16 @@ export type TripLocation = {
 export type TripDocument = {
   id: string;
   tripId: string;
+  userId?: string;
   type: string;
   fileName: string;
   mimeType: string;
   size: number;
   uploadedAt: string;
-  storagePath?: string;
+  storageProvider: 's3' | 'demo';
+  storageBucket?: string;
+  storageKey: string;
+  auditStatus: 'active' | 'deleted';
   demoContent?: string;
 };
 
