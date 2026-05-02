@@ -23,13 +23,20 @@ const paidHeaders = { 'content-type': 'application/json', 'x-demo-paid': 'true' 
 const adminHeaders = { 'content-type': 'application/json', 'x-demo-role': 'admin' };
 
 const checks = [];
-checks.push(['countries', () => request('/api/countries')]);
+checks.push(['countries include public baseline or fallback', async () => {
+  const data = await request('/api/countries');
+  if (!Array.isArray(data.data) || data.data.length < 5) throw new Error('expected country data');
+}]);
 checks.push(['country search', () => request('/api/countries/search?q=Kenya')]);
 checks.push(['city search', () => request('/api/cities/search?q=Nairobi')]);
 checks.push(['country detail', () => request('/api/countries/KE')]);
 checks.push(['city detail', () => request('/api/cities/nairobi-ke')]);
 checks.push(['advisories', () => request('/api/advisories')]);
 checks.push(['risk events', () => request('/api/events')]);
+checks.push(['provider status', async () => {
+  const status = await request('/api/admin/provider-status');
+  if (!Array.isArray(status.providers)) throw new Error('expected provider list');
+}]);
 checks.push(['auth session', () => request('/api/auth/session', { headers: { 'x-demo-paid': 'true' } })]);
 checks.push(['free paid block', async () => {
   const response = await fetch(`${base}/api/trips`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-demo-paid': 'false' }, body: JSON.stringify(tripPayload) });
