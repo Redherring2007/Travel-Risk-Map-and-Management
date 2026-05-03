@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import './atlas-refinements.css';
 
 export const metadata: Metadata = {
   title: 'Atlas Insight Risk Map and Travel Management',
