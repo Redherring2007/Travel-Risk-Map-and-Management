@@ -24,7 +24,18 @@ function fallback(text: string, sources: string[] = []): AiResult {
 
 export async function summarizeCountry(input: { country: string; sourcedFacts: string[] }): Promise<AiResult> {
   if (!aiStatus().configured) return fallback('AI summary unavailable. Showing sourced provider/demo intelligence without generated analysis.', input.sourcedFacts);
-  return { configured: true, provider: process.env.AI_PROVIDER || 'AI provider', model: process.env.AI_MODEL || 'configured model', sourceStatus: 'ai_generated', confidence: 'Medium', text: `AI-generated summary for ${input.country} based only on supplied provider facts.`, sources: input.sourcedFacts };
+  return { configured: true, provider: process.env.AI_PROVIDER || 'AI provider', model: process.env.AI_MODEL || 'configured model', sourceStatus: 'ai_generated', confidence: 'Medium', text: `AI-assisted summary for ${input.country} based only on supplied provider facts.`, sources: input.sourcedFacts };
+}
+
+export function countryVisualPrompt(country: string, region: string, riskLevel: string) {
+  return `Premium dark intelligence atlas diorama of ${country} in ${region}, low-poly terrain, subtle amber data lights, ${riskLevel} risk atmosphere, no text, original Atlas Insight style`;
+}
+
+export function travelMeaningFromScore(score: number) {
+  if (score >= 75) return 'Avoid or tightly control travel with specialist security, medical contingency planning, and executive approval.';
+  if (score >= 50) return 'Travel is possible with enhanced preparation, vetted movement, live alert monitoring, and clear escalation routes.';
+  if (score >= 25) return 'Travel is generally manageable with itinerary awareness, disruption checks, and basic security precautions.';
+  return 'Standard travel precautions are usually sufficient; continue monitoring for disruption and local rule changes.';
 }
 
 export async function extractDocumentItineraryData(fileName: string): Promise<AiResult> {
