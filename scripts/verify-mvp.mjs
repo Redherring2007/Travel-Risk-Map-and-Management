@@ -33,9 +33,30 @@ checks.push(['country detail', () => request('/api/countries/KE')]);
 checks.push(['city detail', () => request('/api/cities/nairobi-ke')]);
 checks.push(['advisories', () => request('/api/advisories')]);
 checks.push(['risk events', () => request('/api/events')]);
-checks.push(['provider status', async () => {
+checks.push(['provider status includes env health', async () => {
   const status = await request('/api/admin/provider-status');
   if (!Array.isArray(status.providers)) throw new Error('expected provider list');
+  if (!Array.isArray(status.environment)) throw new Error('expected environment list');
+}]);
+checks.push(['AI status fallback or configured', async () => {
+  const status = await request('/api/ai/status');
+  if (!('configured' in status)) throw new Error('expected AI configured flag');
+}]);
+checks.push(['protected ingestion blocks public users', async () => {
+  const response = await fetch(`${base}/api/admin/ingest`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ countryIso2: 'KE' }) });
+  if (response.status !== 403) throw new Error(`expected 403, got ${response.status}`);
+}]);
+checks.push(['protected ingestion allows admin demo header', async () => {
+  const data = await request('/api/admin/ingest', { method: 'POST', headers: adminHeaders, body: JSON.stringify({ countryIso2: 'KE' }) });
+  if (!Array.isArray(data.providers)) throw new Error('expected provider ingestion results');
+}]);
+checks.push(['protected country refresh allows admin demo header', async () => {
+  const data = await request('/api/admin/countries/KE/refresh', { method: 'POST', headers: adminHeaders });
+  if (data.requested.countryIso2 !== 'KE') throw new Error('expected country refresh');
+}]);
+checks.push(['protected city refresh allows admin demo header', async () => {
+  const data = await request('/api/admin/cities/nairobi-ke/refresh', { method: 'POST', headers: adminHeaders });
+  if (data.requested.cityId !== 'nairobi-ke') throw new Error('expected city refresh');
 }]);
 checks.push(['auth session', () => request('/api/auth/session', { headers: { 'x-demo-paid': 'true' } })]);
 checks.push(['free paid block', async () => {
@@ -47,7 +68,8 @@ checks.push(['paid trip flow', async () => {
   const tripId = trip.data.id;
   await request(`/api/trips/${tripId}`, { method: 'PATCH', headers: paidHeaders, body: JSON.stringify({ accommodation: 'Updated hotel' }) });
   const upload = await request('/api/storage/upload-url', { method: 'POST', headers: paidHeaders, body: JSON.stringify({ tripId, fileName: 'passport.pdf', contentType: 'application/pdf' }) });
-  const doc = await request(`/api/trips/${tripId}/documents`, { method: 'POST', headers: paidHeaders, body: JSON.stringify({ type: 'Passport', fileName: 'passport.pdf', mimeType: 'application/pdf', size: 1234, storageKey: upload.key }) });
+  const doc = await request(`/api/trips/${tripId}/documents`, { method: 'POST', headers: paidHeaders, body: JSON.stringify({ type: 'passport metadata', fileName: 'passport.pdf', mimeType: 'application/pdf', size: 1234, storageKey: upload.key }) });
+  await request('/api/ai/extract-document', { method: 'POST', headers: paidHeaders, body: JSON.stringify({ fileName: 'passport.pdf' }) });
   await request(`/api/trips/${tripId}/documents/${doc.data.id}`, { headers: { 'x-demo-paid': 'true' } });
   await request('/api/storage/download-url', { method: 'POST', headers: paidHeaders, body: JSON.stringify({ key: doc.data.storageKey }) });
   const report = await request('/api/reports/generate', { method: 'POST', headers: paidHeaders, body: JSON.stringify({ tripId }) });
