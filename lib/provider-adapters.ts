@@ -1,3 +1,4 @@
+import { countryVisualPrompt } from './ai';
 import { alerts, cities, countries } from './data';
 import { score } from './risk-engine';
 import type { Alert, CityProfile, CountryProfile } from './types';
@@ -36,29 +37,32 @@ type RestCountry = {
   capital?: string[];
   region?: string;
   population?: number;
+  area?: number;
   languages?: Record<string, string>;
   currencies?: Record<string, { name: string; symbol?: string }>;
   timezones?: string[];
 };
 
 const limitedRisk = [
-  score('overall', 35, ['REST Countries public baseline', 'Demo fallback risk model'], 'Low', 'limited'),
-  score('security', 35, ['Demo fallback risk model'], 'Low', 'limited'),
-  score('crime', 35, ['Demo fallback risk model'], 'Low', 'limited'),
-  score('political', 35, ['Demo fallback risk model'], 'Low', 'limited'),
-  score('terrorismConflict', 35, ['Demo fallback risk model'], 'Low', 'limited'),
-  score('kidnapExtortion', 35, ['Demo fallback risk model'], 'Low', 'limited'),
-  score('health', 35, ['Demo fallback risk model'], 'Low', 'limited'),
-  score('medical', 35, ['Demo fallback risk model'], 'Low', 'limited'),
-  score('naturalDisaster', 35, ['Demo fallback risk model'], 'Low', 'limited'),
-  score('transport', 35, ['Demo fallback risk model'], 'Low', 'limited'),
-  score('infrastructure', 35, ['Demo fallback risk model'], 'Low', 'limited'),
-  score('legalCultural', 35, ['Demo fallback risk model'], 'Low', 'limited'),
-  score('travelDisruption', 35, ['Demo fallback risk model'], 'Low', 'limited')
+  score('overall', 18, ['REST Countries public baseline', 'Demo fallback risk model'], 'Low', 'limited'),
+  score('security', 18, ['Demo fallback risk model'], 'Low', 'limited'),
+  score('crime', 18, ['Demo fallback risk model'], 'Low', 'limited'),
+  score('political', 18, ['Demo fallback risk model'], 'Low', 'limited'),
+  score('terrorismConflict', 18, ['Demo fallback risk model'], 'Low', 'limited'),
+  score('kidnapExtortion', 18, ['Demo fallback risk model'], 'Low', 'limited'),
+  score('health', 18, ['Demo fallback risk model'], 'Low', 'limited'),
+  score('medical', 18, ['Demo fallback risk model'], 'Low', 'limited'),
+  score('naturalDisaster', 18, ['Demo fallback risk model'], 'Low', 'limited'),
+  score('transport', 18, ['Demo fallback risk model'], 'Low', 'limited'),
+  score('infrastructure', 18, ['Demo fallback risk model'], 'Low', 'limited'),
+  score('legalCultural', 18, ['Demo fallback risk model'], 'Low', 'limited'),
+  score('travelDisruption', 18, ['Demo fallback risk model'], 'Low', 'limited')
 ];
 
 function limitedCountry(item: RestCountry): CountryProfile {
   const existing = countries.find((country) => country.iso2 === item.cca2);
+  const area = item.area ? `${item.area.toLocaleString('en')} sq km` : existing?.area;
+  const visualPrompt = existing?.countryVisualPrompt ?? countryVisualPrompt(item.name.common, item.region ?? 'Unknown region', existing?.risk[0]?.level ?? 'Low');
   if (existing) {
     return {
       ...existing,
@@ -68,6 +72,9 @@ function limitedCountry(item: RestCountry): CountryProfile {
       capital: item.capital?.[0] ?? existing.capital,
       region: item.region ?? existing.region,
       population: item.population ? item.population.toLocaleString('en') : existing.population,
+      area,
+      gdp: existing.gdp ?? 'Limited verified data available',
+      countryVisualPrompt: visualPrompt,
       languages: item.languages ? Object.values(item.languages) : existing.languages,
       currency: item.currencies ? Object.keys(item.currencies).join(', ') : existing.currency,
       timeZones: item.timezones ?? existing.timeZones,
@@ -82,6 +89,9 @@ function limitedCountry(item: RestCountry): CountryProfile {
     capital: item.capital?.[0] ?? 'Limited verified data available',
     region: item.region ?? 'Limited verified data available',
     population: item.population ? item.population.toLocaleString('en') : 'Limited verified data available',
+    area: area ?? 'Limited verified data available',
+    gdp: 'Limited verified data available',
+    countryVisualPrompt: visualPrompt,
     governmentType: 'Limited verified data available',
     languages: item.languages ? Object.values(item.languages) : ['Limited verified data available'],
     currency: item.currencies ? Object.keys(item.currencies).join(', ') : 'Limited verified data available',
@@ -112,7 +122,7 @@ export const restCountriesProvider: CountryBaselineProvider = {
   key: 'rest-countries-live',
   async getCountries() {
     try {
-      const response = await fetch('https://restcountries.com/v3.1/all?fields=cca2,cca3,name,capital,region,population,languages,currencies,timezones', { next: { revalidate: 86_400 } });
+      const response = await fetch('https://restcountries.com/v3.1/all?fields=cca2,cca3,name,capital,region,population,area,languages,currencies,timezones', { next: { revalidate: 86_400 } });
       if (!response.ok) throw new Error(`REST Countries returned ${response.status}`);
       const data = (await response.json()) as RestCountry[];
       return { status: 'live', data: data.map(limitedCountry).sort((a, b) => a.name.localeCompare(b.name)), source: 'REST Countries', notes: 'Live public baseline fields. Intelligence fields remain demo/limited unless provider feeds are connected.' };
