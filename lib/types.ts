@@ -34,6 +34,10 @@ export type CountryProfile = {
   capital: string;
   region: string;
   population: string;
+  area?: string;
+  gdp?: string;
+  countryImageUrl?: string;
+  countryVisualPrompt?: string;
   governmentType: string;
   languages: string[];
   currency: string;
