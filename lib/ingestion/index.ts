@@ -60,7 +60,7 @@ async function persistItem(item: ProviderItem) {
   await query(
     `insert into source_references (source_key, source_name, source_type, title, url, country_iso2, city_name, confidence, source_status, published_at, raw_payload)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-     on conflict (source_key, title, coalesce(country_iso2, ''), coalesce(city_name, '')) do nothing`,
+     on conflict do nothing`,
     [providerKey, item.provider, item.category, item.title, item.url ?? null, item.countryIso2 ?? null, item.city ?? null, item.confidence, item.sourceStatus, item.publishedAt, item.rawPayload ?? {}]
   ).catch(() => []);
 
