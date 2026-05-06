@@ -5,7 +5,7 @@ import { isNeonConfigured, query } from './neon';
 import { calculateTripRisk, type AtlasRiskResult, type RouteSegmentRisk } from './risk-engine';
 import { loadCityProfile, loadFreshnessSummary, loadRelevantAdvisories, loadRelevantEvents } from './source-data';
 import { store } from './store';
-import type { Alert, Trip, TripDocument, TripReport } from './types';
+import type { Alert, Trip, TripReport } from './types';
 
 export type TripAssessmentRecord = AtlasRiskResult & {
   id: string;
@@ -37,6 +37,7 @@ function normaliseAssessment(row: {
   route_risks: RouteSegmentRisk[] | null;
   missing_data: string[] | null;
   source_summary: AtlasRiskResult['sourceSummary'] | null;
+  freshness: AtlasRiskResult['freshness'] | null;
   created_at: string;
 }): TripAssessmentRecord {
   const score = Number(row.overall_score);
@@ -50,7 +51,7 @@ function normaliseAssessment(row: {
     keyDrivers: row.key_drivers ?? [],
     sourceSummary: row.source_summary ?? [],
     missingData: row.missing_data ?? [],
-    freshness: { status: 'limited', confidenceModifier: 0, notes: ['Loaded from saved assessment.'] },
+    freshness: row.freshness ?? { status: 'limited', confidenceModifier: 0, notes: ['Loaded from saved assessment.'] },
     routeRisks: row.route_risks ?? [],
     itineraryRisks: row.itinerary_risks ?? {},
     createdAt: row.created_at
@@ -91,16 +92,16 @@ export async function assessTripRisk(trip: Trip): Promise<TripAssessmentRecord> 
   }
 
   const rows = await query<{ id: string; created_at: string }>(
-    `insert into trip_risk_assessments (trip_id, overall_score, overall_level, confidence, key_drivers, itinerary_risks, route_risks, missing_data, source_summary, generated_by)
-     values ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10) returning id, created_at`,
-    [trip.id, record.score, record.level, record.confidence, JSON.stringify(record.keyDrivers), JSON.stringify(record.itineraryRisks), JSON.stringify(record.routeRisks), JSON.stringify(record.missingData), JSON.stringify(record.sourceSummary), record.aiAssessment?.configured ? 'ai_assisted' : 'rules_engine']
+    `insert into trip_risk_assessments (trip_id, overall_score, overall_level, confidence, key_drivers, itinerary_risks, route_risks, missing_data, source_summary, freshness, generated_by)
+     values ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11) returning id, created_at`,
+    [trip.id, record.score, record.level, record.confidence, JSON.stringify(record.keyDrivers), JSON.stringify(record.itineraryRisks), JSON.stringify(record.routeRisks), JSON.stringify(record.missingData), JSON.stringify(record.sourceSummary), JSON.stringify(record.freshness), record.aiAssessment?.configured ? 'ai_assisted' : 'rules_engine']
   ).catch(() => []);
 
   if (rows[0]) {
     record.id = rows[0].id;
     record.createdAt = rows[0].created_at;
     await Promise.all(record.routeRisks.map((segment, index) => query(
-      `insert into route_risk_segments (trip_id, assessment_id, sequence, segment_name, origin, destination, score, level, drivers, mitigation)
+      `insert into route_risk_segments (trip_id, assessment_id, sequence, segment_name, from_location, to_location, score, level, drivers, mitigation)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)`,
       [trip.id, record.id, index + 1, segment.segmentName, segment.from ?? null, segment.to ?? null, segment.score, segment.level, JSON.stringify(segment.drivers), segment.mitigation]
     ).catch(() => [])));
