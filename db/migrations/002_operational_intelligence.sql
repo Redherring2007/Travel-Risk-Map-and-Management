@@ -32,6 +32,7 @@ create table if not exists route_risk_segments (
   id uuid primary key default gen_random_uuid(),
   assessment_id uuid references trip_risk_assessments(id) on delete cascade,
   trip_id uuid not null references trips(id) on delete cascade,
+  sequence integer not null default 1,
   segment_name text not null,
   from_location text,
   to_location text,
@@ -68,8 +69,7 @@ create table if not exists source_references (
   source_status text not null default 'demo',
   published_at timestamptz,
   ingested_at timestamptz not null default now(),
-  raw_payload jsonb not null default '{}'::jsonb,
-  unique(source_key, title, coalesce(country_iso2, ''), coalesce(city_name, ''))
+  raw_payload jsonb not null default '{}'::jsonb
 );
 
 alter table countries add column if not exists area text;
@@ -94,3 +94,4 @@ create index if not exists idx_trip_risk_assessments_trip on trip_risk_assessmen
 create index if not exists idx_route_risk_segments_trip on route_risk_segments(trip_id);
 create index if not exists idx_ai_report_runs_trip on ai_report_runs(trip_id, created_at desc);
 create index if not exists idx_source_references_country on source_references(country_iso2, source_type);
+create unique index if not exists idx_source_references_dedupe on source_references (source_key, title, coalesce(country_iso2, ''), coalesce(city_name, ''));
