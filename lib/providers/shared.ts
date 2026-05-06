@@ -21,16 +21,20 @@ export type ProviderItem = {
 
 export type ProviderResult = {
   provider: string;
-  providerKey: string;
+  providerKey?: string;
   status: 'live' | 'demo_fallback' | 'missing_key' | 'unavailable';
   source: string;
   url?: string;
   fetchedAt: string;
   items: ProviderItem[];
   message: string;
-  errors: string[];
+  errors?: string[];
   requiredForRisk?: boolean;
 };
+
+export function providerKeyFor(provider: string) {
+  return provider.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'provider';
+}
 
 export function severityFromText(value = ''): RiskLevel {
   const text = value.toLowerCase();
@@ -46,7 +50,7 @@ export function confidenceFromStatus(status: 'live' | 'demo' | 'limited'): Confi
   return 'Low';
 }
 
-export function fallbackResult(provider: string, source: string, message: string, countryIso2?: string, providerKey = provider.toLowerCase().replace(/[^a-z0-9]+/g, '-')): ProviderResult {
+export function fallbackResult(provider: string, source: string, message: string, countryIso2?: string, providerKey = providerKeyFor(provider)): ProviderResult {
   return {
     provider,
     providerKey,
