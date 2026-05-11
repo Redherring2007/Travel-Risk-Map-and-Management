@@ -3,10 +3,14 @@ import { isNeonConfigured, query } from '@/lib/neon';
 import { fetchCanadaTravelAdvice } from '@/lib/providers/canada-travel';
 import { fetchFcdoAdvice } from '@/lib/providers/fcdo';
 import { fetchAviationDisruption, fetchGdacsAlerts, fetchGdeltEvents, fetchHealthAlerts, fetchNzMfatAdvice, fetchUsgsEarthquakes } from '@/lib/providers/operational';
+import { fetchOfficialPageExtractions } from '@/lib/providers/official-page-extractor';
+import { fetchOsmPois } from '@/lib/providers/osm';
 import { fetchPublicRssFeeds } from '@/lib/providers/public-rss';
 import { fetchRestCountriesBaseline } from '@/lib/providers/rest-countries';
 import { fetchSmartravellerAdvice } from '@/lib/providers/smartraveller';
 import { fetchUsStateAdvice } from '@/lib/providers/us-state';
+import { fetchWikidataCountryContext } from '@/lib/providers/wikidata';
+import { fetchWorldBankCountryIndicators } from '@/lib/providers/world-bank';
 import { providerKeyFor, type ProviderItem, type ProviderResult } from '@/lib/providers/shared';
 
 export type IngestionOptions = { providers?: string[]; countryIso2?: string; cityId?: string };
@@ -24,7 +28,11 @@ const providerRunners: Record<string, (countryIso2?: string) => Promise<Provider
   gdelt: fetchGdeltEvents,
   health: fetchHealthAlerts,
   aviation: fetchAviationDisruption,
-  rss: () => fetchPublicRssFeeds()
+  rss: () => fetchPublicRssFeeds(),
+  'world-bank': fetchWorldBankCountryIndicators,
+  wikidata: fetchWikidataCountryContext,
+  osm: fetchOsmPois,
+  'official-page-extractor': fetchOfficialPageExtractions
 };
 
 function dedupe(items: ProviderItem[]) {
@@ -54,6 +62,108 @@ async function persistFreshness(result: ProviderResult, recordsStored: number, e
   ).catch(() => []);
 }
 
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function nestedRecord(value: unknown, key: string): Record<string, unknown> {
+  return objectRecord(objectRecord(value)[key]);
+}
+
+function pointValue(raw: unknown, key: string): number | null {
+  const point = objectRecord(nestedRecord(raw, key).point);
+  const value = point.value;
+  return typeof value === 'number' ? value : null;
+}
+
+function pointDate(raw: unknown, key: string): string | null {
+  const point = objectRecord(nestedRecord(raw, key).point);
+  const value = point.date;
+  return typeof value === 'string' ? value : null;
+}
+
+async function persistExpandedCountryData(item: ProviderItem) {
+  if (!isNeonConfigured()) return;
+  const countryIso2 = item.countryIso2;
+  if (!countryIso2) return;
+  const raw = objectRecord(item.rawPayload);
+
+  if (item.providerKey === 'world-bank') {
+    const infrastructure = {
+      airPassengers: pointValue(raw, 'airPassengers'),
+      airPassengersYear: pointDate(raw, 'airPassengers')
+    };
+    await query(
+      `insert into country_master_profiles (country_iso2, source, fetched_at, confidence, gdp_current_usd, inflation_percent, population_total, life_expectancy_years, internet_users_percent, health_expenditure_percent_gdp, infrastructure_indicators, raw_payload)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb)
+       on conflict (country_iso2) do update set source = excluded.source, fetched_at = excluded.fetched_at, confidence = excluded.confidence, gdp_current_usd = excluded.gdp_current_usd, inflation_percent = excluded.inflation_percent, population_total = excluded.population_total, life_expectancy_years = excluded.life_expectancy_years, internet_users_percent = excluded.internet_users_percent, health_expenditure_percent_gdp = excluded.health_expenditure_percent_gdp, infrastructure_indicators = excluded.infrastructure_indicators, raw_payload = excluded.raw_payload, updated_at = now()`,
+      [countryIso2, item.provider, item.publishedAt, item.confidence, pointValue(raw, 'gdpCurrentUsd'), pointValue(raw, 'inflationPercent'), pointValue(raw, 'populationTotal'), pointValue(raw, 'lifeExpectancyYears'), pointValue(raw, 'internetUsersPercent'), pointValue(raw, 'healthExpenditurePercentGdp'), JSON.stringify(infrastructure), JSON.stringify(raw)]
+    ).catch(() => []);
+    await query(
+      `insert into country_health_profiles (country_iso2, source, fetched_at, confidence, health_expenditure_percent_gdp, life_expectancy_years, raw_payload)
+       values ($1,$2,$3,$4,$5,$6,$7::jsonb)
+       on conflict (country_iso2) do update set source = excluded.source, fetched_at = excluded.fetched_at, confidence = excluded.confidence, health_expenditure_percent_gdp = excluded.health_expenditure_percent_gdp, life_expectancy_years = excluded.life_expectancy_years, raw_payload = excluded.raw_payload, updated_at = now()`,
+      [countryIso2, item.provider, item.publishedAt, item.confidence, pointValue(raw, 'healthExpenditurePercentGdp'), pointValue(raw, 'lifeExpectancyYears'), JSON.stringify(raw)]
+    ).catch(() => []);
+    await query(
+      `insert into country_infrastructure_profiles (country_iso2, source, fetched_at, confidence, internet_users_percent, infrastructure_indicators, raw_payload)
+       values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb)
+       on conflict (country_iso2) do update set source = excluded.source, fetched_at = excluded.fetched_at, confidence = excluded.confidence, internet_users_percent = excluded.internet_users_percent, infrastructure_indicators = excluded.infrastructure_indicators, raw_payload = excluded.raw_payload, updated_at = now()`,
+      [countryIso2, item.provider, item.publishedAt, item.confidence, pointValue(raw, 'internetUsersPercent'), JSON.stringify(infrastructure), JSON.stringify(raw)]
+    ).catch(() => []);
+  }
+
+  if (item.providerKey === 'wikidata') {
+    await query(
+      `insert into country_master_profiles (country_iso2, source, fetched_at, confidence, raw_payload)
+       values ($1,$2,$3,$4,$5::jsonb)
+       on conflict (country_iso2) do update set source = excluded.source, fetched_at = excluded.fetched_at, confidence = excluded.confidence, raw_payload = country_master_profiles.raw_payload || excluded.raw_payload, updated_at = now()`,
+      [countryIso2, item.provider, item.publishedAt, item.confidence, JSON.stringify(raw)]
+    ).catch(() => []);
+    await query(
+      `insert into country_security_profiles (country_iso2, source, fetched_at, confidence, raw_payload)
+       values ($1,$2,$3,$4,$5::jsonb)
+       on conflict (country_iso2) do update set source = excluded.source, fetched_at = excluded.fetched_at, confidence = excluded.confidence, raw_payload = excluded.raw_payload, updated_at = now()`,
+      [countryIso2, item.provider, item.publishedAt, item.confidence, JSON.stringify(raw)]
+    ).catch(() => []);
+  }
+
+  if (item.providerKey === 'osm') {
+    for (const [poiType, container] of Object.entries(raw)) {
+      const data = objectRecord(container).data;
+      const rows = Array.isArray(data) ? data.slice(0, 20) : [];
+      for (const row of rows) {
+        const poi = objectRecord(row);
+        const name = String(poi.display_name ?? poi.name ?? `${poiType} candidate`);
+        const lat = Number(poi.lat);
+        const lon = Number(poi.lon);
+        await query(
+          `insert into location_pois (country_iso2, poi_type, name, latitude, longitude, address, source, source_url, confidence, fetched_at, raw_payload)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
+          [countryIso2, poiType, name, Number.isFinite(lat) ? lat : null, Number.isFinite(lon) ? lon : null, name, item.provider, item.url ?? null, item.confidence, item.publishedAt, JSON.stringify(poi)]
+        ).catch(() => []);
+        if (poiType === 'hotels') {
+          await query(
+            `insert into hotel_candidates (country_iso2, name, latitude, longitude, address, source, source_url, confidence, fetched_at, raw_payload)
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
+            [countryIso2, name, Number.isFinite(lat) ? lat : null, Number.isFinite(lon) ? lon : null, name, item.provider, item.url ?? null, item.confidence, item.publishedAt, JSON.stringify(poi)]
+          ).catch(() => []);
+        }
+      }
+    }
+  }
+
+  if (item.providerKey === 'official-page-extractor') {
+    await query(
+      `insert into official_page_extractions (country_iso2, source_url, title, extracted_text, extraction_method, confidence, fetched_at, raw_payload)
+       values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+       on conflict (source_url, coalesce(country_iso2, '')) do update set title = excluded.title, extracted_text = excluded.extracted_text, confidence = excluded.confidence, fetched_at = excluded.fetched_at, raw_payload = excluded.raw_payload`,
+      [countryIso2, item.url ?? item.id, item.title, String(objectRecord(raw).extractedText ?? item.summary), String(objectRecord(raw).extractionMethod ?? 'controlled-public-page-fetch'), item.confidence, item.publishedAt, JSON.stringify(raw)]
+    ).catch(() => []);
+  }
+}
+
 async function persistItem(item: ProviderItem) {
   if (!isNeonConfigured()) return false;
   const providerKey = item.providerKey ?? providerKeyFor(item.provider);
@@ -77,11 +187,12 @@ async function persistItem(item: ProviderItem) {
       [item.title, item.countryIso2 ?? null, item.city ?? null, item.category, item.severity ?? 'Moderate', item.provider, item.summary, item.recommendedAction ?? 'Review source and adapt itinerary controls.', item.publishedAt, item.confidence, item.sourceStatus === 'live' ? 'pending' : 'approved', item.rawPayload ?? {}]
     ).catch(() => []);
   }
+  await persistExpandedCountryData(item);
   return true;
 }
 
 export async function runIngestion(options: IngestionOptions = {}) {
-  const selected = options.providers?.length ? options.providers : ['rest-countries', 'fcdo', 'us-state', 'canada', 'smartraveller', 'nz-mfat', 'gdacs', 'usgs', 'gdelt', 'health', 'aviation', 'rss'];
+  const selected = options.providers?.length ? options.providers : ['rest-countries', 'world-bank', 'wikidata', 'osm', 'official-page-extractor', 'fcdo', 'us-state', 'canada', 'smartraveller', 'nz-mfat', 'gdacs', 'usgs', 'gdelt', 'health', 'aviation', 'rss'];
   const summaries: IngestionProviderSummary[] = [];
 
   for (const providerKey of selected) {

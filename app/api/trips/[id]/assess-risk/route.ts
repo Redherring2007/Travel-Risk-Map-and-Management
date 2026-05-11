@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSession, requirePaid } from '@/lib/auth';
 import { store } from '@/lib/store';
 import { assessTripRisk } from '@/lib/trip-assessment';
+import { sourceTransparency } from '@/lib/source-data';
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = getSession(request.headers);
@@ -14,5 +15,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (trip.userId !== user.id && user.role !== 'admin') return NextResponse.json({ error: 'Trip access denied' }, { status: 403 });
 
   const assessment = await assessTripRisk(trip);
-  return NextResponse.json({ data: assessment });
+  const primary = trip.locations[0];
+  const transparency = await sourceTransparency('neon-persisted-first', false, primary?.countryIso2);
+  return NextResponse.json({ data: assessment, ...transparency });
 }

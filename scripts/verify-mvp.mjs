@@ -1,4 +1,4 @@
-const base = process.env.NEXT_PUBLIC_APP_URL || 'http://127.0.0.1:3000';
+const base = process.env.BASE_URL || process.env.NEXT_PUBLIC_APP_URL || 'http://127.0.0.1:3000';
 
 async function request(path, options = {}) {
   const response = await fetch(`${base}${path}`, options);
@@ -58,6 +58,16 @@ checks.push(['AI status fallback or configured', async () => {
   const status = await request('/api/ai/status');
   if (!('configured' in status)) throw new Error('expected AI configured flag');
 }]);
+
+checks.push(['admin data diagnostics', async () => {
+  const data = await request('/api/admin/diagnostics/data-status', { headers: adminHeaders });
+  if (!Array.isArray(data.tableCounts) || !Array.isArray(data.emptyTables)) throw new Error('expected data diagnostics table counts');
+}]);
+checks.push(['admin provider diagnostics', async () => {
+  const data = await request('/api/admin/diagnostics/provider-status', { headers: adminHeaders });
+  if (!Array.isArray(data.providers)) throw new Error('expected provider diagnostics');
+}]);
+
 checks.push(['protected ingestion blocks public users', async () => {
   const response = await fetch(`${base}/api/admin/ingest`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providers: ['rest-countries'], countryIso2: 'KE' }) });
   if (response.status !== 403) throw new Error(`expected 403, got ${response.status}`);
@@ -97,6 +107,51 @@ checks.push(['paid trip assessment and report flow', async () => {
   const legacyReport = await request('/api/reports/generate', { method: 'POST', headers: paidHeaders, body: JSON.stringify({ tripId }) });
   await request(`/api/reports/${legacyReport.data.id}/download`);
 }]);
+
+checks.push(['universal risk matrix template API', async () => {
+  const data = await request('/api/risk-matrix/templates?industry=security');
+  if (!data.data?.industry || !Array.isArray(data.data.hazards) || data.data.hazards.length === 0) throw new Error('expected security risk matrix template');
+}]);
+checks.push(['universal risk matrix assessment API', async () => {
+  const data = await request('/api/risk-matrix/assess', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      industry: 'security',
+      activity: 'Executive arrival briefing',
+      location: 'Nairobi',
+      items: [{
+        hazard: 'Unauthorised access',
+        threat: 'Intrusion or hostile surveillance',
+        vulnerability: 'Visitor screening not confirmed',
+        likelihood: 3,
+        impact: 4,
+        exposure: 3,
+        existingControls: ['Access control'],
+        sourceEvidence: ['Client-provided venue security note']
+      }],
+      sourceEvidence: ['Atlas Insight verification scenario']
+    })
+  });
+  if (!data.data?.summary || data.data.items[0].inherentScore !== 12) throw new Error('expected scored matrix item');
+}]);
+checks.push(['universal risk matrix suggestion API', async () => {
+  const data = await request('/api/risk-matrix/suggest', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      industry: 'security',
+      activity: 'VIP venue arrival',
+      location: 'Nairobi',
+      context: 'Public-facing arrival with limited venue advance information.',
+      knownHazards: ['Unauthorised access'],
+      existingControls: ['Access control'],
+      sourceEvidence: ['User supplied event context']
+    })
+  });
+  if (!data.data?.matrix?.summary || !data.data?.ai?.sourceStatus) throw new Error('expected matrix suggestions and AI/fallback status');
+}]);
+
 checks.push(['billing checkout placeholder', () => request('/api/billing/checkout', { method: 'POST', headers: paidHeaders })]);
 checks.push(['billing webhook placeholder', () => request('/api/billing/webhook', { method: 'POST', headers: paidHeaders, body: JSON.stringify({ userId: '00000000-0000-4000-8000-000000000002' }) })]);
 checks.push(['admin approve alert', () => request('/api/admin/alerts/a3/approve', { method: 'POST', headers: adminHeaders })]);

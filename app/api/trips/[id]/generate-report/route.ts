@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSession, requirePaid } from '@/lib/auth';
 import { store } from '@/lib/store';
 import { generateAndSaveOperationalReport, getLatestTripAssessment } from '@/lib/trip-assessment';
+import { sourceTransparency } from '@/lib/source-data';
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = getSession(request.headers);
@@ -15,6 +16,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const latestAssessment = await getLatestTripAssessment(trip.id);
   const result = await generateAndSaveOperationalReport(trip, latestAssessment ?? undefined);
+  const primary = trip.locations[0];
+  const transparency = await sourceTransparency('neon-persisted-first', false, primary?.countryIso2);
   return NextResponse.json({
     data: {
       id: result.report.id,
@@ -31,6 +34,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         groundedSourceCount: result.ai.groundedSourceCount,
         error: result.ai.error
       }
-    }
+    },
+    ...transparency
   }, { status: 201 });
 }

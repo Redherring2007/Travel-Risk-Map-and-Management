@@ -9,14 +9,24 @@ export type ProviderDescriptor = {
   notes: string;
 };
 
+const PLACEHOLDER_VALUES = new Set(['replace-me', 'changeme', 'change-me', 'your-key-here', 'your_key_here', '']);
+
+function configured(value?: string) {
+  const trimmed = value?.trim() ?? '';
+  return Boolean(trimmed) && !PLACEHOLDER_VALUES.has(trimmed.toLowerCase());
+}
+
 function statusFor(required: string[]): ProviderStatus {
   if (required.length === 0) return 'ready';
-  return required.every((key) => Boolean(process.env[key])) ? 'ready' : 'not_configured';
+  return required.every((key) => configured(process.env[key])) ? 'ready' : 'not_configured';
 }
 
 export const providers: ProviderDescriptor[] = [
   { key: 'rest-countries', name: 'REST Countries', category: 'country_baseline', envVars: [], status: 'ready', notes: 'Public no-key baseline country fields. Falls back to local demo if unreachable.' },
-  { key: 'world-bank', name: 'World Bank / UN indicators', category: 'country_baseline', envVars: [], status: 'ready', notes: 'Public no-key adapter-ready source for indicators.' },
+  { key: 'world-bank', name: 'World Bank indicators', category: 'country_depth', envVars: [], status: 'ready', notes: 'Public no-key country development, health, population and infrastructure indicators.' },
+  { key: 'wikidata', name: 'Wikidata country context', category: 'country_depth', envVars: [], status: 'ready', notes: 'Public SPARQL endpoint for government, timezone, emergency number and infrastructure context. Verify critical facts.' },
+  { key: 'osm', name: 'OpenStreetMap POI context', category: 'location_depth', envVars: [], status: 'ready', notes: 'Public Nominatim POI candidates for hotels, hospitals, embassies, police, airports and transport hubs. Conservative request volume only.' },
+  { key: 'official-page-extractor', name: 'Official page extractor', category: 'country_depth', envVars: ['OFFICIAL_PAGE_URLS'], status: statusFor(['OFFICIAL_PAGE_URLS']), notes: 'Controlled extraction from configured official/public pages only. Stores text, URL and timestamp without inventing fields.' },
   { key: 'cia-factbook', name: 'CIA Factbook-style country data', category: 'country_baseline', envVars: ['CIA_FACTBOOK_SOURCE_URL'], status: statusFor(['CIA_FACTBOOK_SOURCE_URL']), notes: 'Configure source URL or internal ingestion job.' },
   { key: 'uk-fcdo', name: 'UK FCDO Travel Advice', category: 'travel_advice', envVars: ['UK_FCDO_API_URL'], status: statusFor(['UK_FCDO_API_URL']), notes: 'Connect advisory feed or scraper endpoint.' },
   { key: 'us-state', name: 'US State Department Advisories', category: 'travel_advice', envVars: ['US_STATE_ADVISORY_API_URL'], status: statusFor(['US_STATE_ADVISORY_API_URL']), notes: 'Connect official advisory source.' },
