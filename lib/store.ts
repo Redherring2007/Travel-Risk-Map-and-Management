@@ -3,10 +3,25 @@ import { alerts, countries } from './data';
 import { isNeonConfigured, query } from './neon';
 import type { Alert, TravellerProfile, Trip, TripDocument, TripLocation, TripReport } from './types';
 
-const trips = new Map<string, Trip>();
-const documents = new Map<string, TripDocument[]>();
-const reports = new Map<string, TripReport>();
-const mutableAlerts = new Map<string, Alert>(alerts.map((alert) => [alert.id, alert]));
+type DemoStoreState = {
+  trips: Map<string, Trip>;
+  documents: Map<string, TripDocument[]>;
+  reports: Map<string, TripReport>;
+  mutableAlerts: Map<string, Alert>;
+};
+
+const globalDemoStore = globalThis as typeof globalThis & {
+  __atlasTravelDemoStore?: DemoStoreState;
+};
+
+const demoState = globalDemoStore.__atlasTravelDemoStore ??= {
+  trips: new Map<string, Trip>(),
+  documents: new Map<string, TripDocument[]>(),
+  reports: new Map<string, TripReport>(),
+  mutableAlerts: new Map<string, Alert>(alerts.map((alert) => [alert.id, alert]))
+};
+
+const { trips, documents, reports, mutableAlerts } = demoState;
 
 type TripInput = Omit<Trip, 'id' | 'createdAt' | 'updatedAt'>;
 type DocumentInput = Omit<TripDocument, 'id' | 'uploadedAt' | 'auditStatus'>;
