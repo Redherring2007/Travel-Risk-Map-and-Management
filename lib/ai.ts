@@ -14,15 +14,22 @@ export type AiResult = {
 
 export type AiReportOutput = AiResult & { markdown: string; status: 'ai_generated' | 'fallback'; groundedSourceCount: number };
 
+function missingKey(value?: string) {
+  const key = value?.trim().toLowerCase();
+  return !key || ['replace-me', 'changeme', 'your-key-here'].includes(key);
+}
+
 export function aiStatus() {
+  const provider = process.env.AI_PROVIDER || 'openai';
   const key = process.env.OPENAI_API_KEY || process.env.AI_API_KEY;
   const mock = process.env.AI_MOCK_MODE === 'true';
+  const ollama = provider === 'ollama';
   return {
-    configured: Boolean(key) || mock,
+    configured: ollama || !missingKey(key) || mock,
     mock,
-    provider: process.env.AI_PROVIDER || 'openai',
-    model: process.env.AI_MODEL || 'gpt-4.1-mini',
-    status: key ? 'AI provider configured' : mock ? 'AI mock mode active' : 'AI extraction unavailable - manual entry required'
+    provider,
+    model: process.env.AI_REPORT_MODEL || process.env.OLLAMA_TRAVEL_MODEL || process.env.AI_MODEL || (ollama ? 'atlas-travel-risk' : 'gpt-4.1-mini'),
+    status: ollama ? 'Ollama provider configured' : !missingKey(key) ? 'AI provider configured' : mock ? 'AI mock mode active' : 'AI extraction unavailable - manual entry required'
   };
 }
 
@@ -34,8 +41,23 @@ function fallback(text: string, sources: string[] = []): AiResult {
 async function callOpenAi(system: string, user: string): Promise<string> {
   const status = aiStatus();
   if (status.mock) return `AI mock mode: ${user.slice(0, 1200)}`;
+  if (status.provider === 'ollama') {
+    const baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: status.model,
+        stream: false,
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
+      })
+    });
+    if (!response.ok) throw new Error(`Ollama returned ${response.status}`);
+    const json = await response.json();
+    return String(json.message?.content ?? '');
+  }
   const key = process.env.OPENAI_API_KEY || process.env.AI_API_KEY;
-  if (!key) throw new Error('AI key missing');
+  if (missingKey(key)) throw new Error('AI key missing');
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
@@ -95,6 +117,38 @@ export async function generateItineraryRiskAssessment(input: { trip: Trip; asses
 export async function generateReportNarrative(sources: string[]): Promise<AiResult> {
   if (!aiStatus().configured) return fallback('Report narrative uses deterministic Atlas Insight templates because AI is not configured.', sources);
   return { configured: true, provider: aiStatus().provider, model: aiStatus().model, sourceStatus: 'ai_generated', confidence: 'Medium', text: 'AI narrative scaffold active. Generated text must cite supplied provider sources and state limitations.', sources };
+}
+
+export async function generateVisualReportExecutiveSummary(input: {
+  destination: string;
+  score: number | null;
+  level: string;
+  recommendation: string;
+  confidence: string;
+  keyReason: string;
+  advisory: string;
+  missingData: string[];
+  sourceSummary: string[];
+}): Promise<AiResult> {
+  const status = aiStatus();
+  const sources = input.sourceSummary.filter(Boolean);
+  if (!status.configured) return fallback('AI visual report summary unavailable; deterministic executive summary used.', sources);
+  try {
+    const text = await callOpenAi(
+      `${groundedSystem()} Write no more than five concise lines. Use formal UK English. Do not add facts, events, hotel names, emergency numbers or advisories not present in the supplied cleaned visual report model. Do not output JSON.`,
+      JSON.stringify({
+        destination: input.destination,
+        risk: { score: input.score, level: input.level, recommendation: input.recommendation, confidence: input.confidence },
+        keyReason: input.keyReason,
+        advisory: input.advisory,
+        missingData: input.missingData.slice(0, 8),
+        sourceSummary: sources.slice(0, 8)
+      }, null, 2)
+    );
+    return { configured: true, provider: status.provider, model: status.model, sourceStatus: 'ai_generated', confidence: 'Medium', text, sources };
+  } catch (error) {
+    return { ...fallback('AI visual report summary failed; deterministic executive summary used.', sources), error: error instanceof Error ? error.message : 'unknown error' };
+  }
 }
 
 export async function generateTravelRiskReport(input: { trip: Trip; documents: TripDocument[]; assessment: AtlasRiskResult & { routeRisks?: RouteSegmentRisk[]; itineraryRisks?: Record<string, unknown> }; advisories: Alert[]; events: Alert[]; sourceList: string[] }): Promise<AiReportOutput> {
