@@ -1,4 +1,5 @@
 import { alerts, cities, countries } from './data';
+import { filterRelevantAlerts } from './event-relevance';
 import { isNeonConfigured, query } from './neon';
 import type { Alert } from './types';
 
@@ -11,7 +12,8 @@ type FreshnessRow = { source_key: string; source_name: string; status: string; l
 export async function loadRelevantEvents(countryIso2?: string, cityName?: string): Promise<Alert[]> {
   if (!isNeonConfigured()) {
     const country = countries.find((item) => item.iso2 === countryIso2);
-    return alerts.filter((alert) => !country || alert.country === country.name || alert.city === cityName);
+    const relevant = alerts.filter((alert) => !country || alert.country === country.name || alert.city === cityName);
+    return filterRelevantAlerts(relevant, countryIso2, cityName).slice(0, 25);
   }
   const rows = await query<EventRow>(
     `select title, country_iso2, city_name, category, severity, source, summary, recommended_action, occurred_at, event_time, confidence, status
@@ -19,7 +21,8 @@ export async function loadRelevantEvents(countryIso2?: string, cityName?: string
      order by coalesce(event_time, occurred_at) desc limit 100`,
     [countryIso2 ?? null, cityName ?? null]
   ).catch(() => []);
-  return rows.map((row, index) => ({ id: `db-event-${index}`, title: row.title, country: countries.find((item) => item.iso2 === row.country_iso2)?.name ?? row.country_iso2 ?? 'Global', city: row.city_name ?? undefined, category: row.category, severity: row.severity, source: row.source, timestamp: row.event_time ?? row.occurred_at, summary: row.summary, recommendedAction: row.recommended_action ?? 'Review source and adapt itinerary controls.', approved: row.status === 'approved' }));
+  const mapped = rows.map((row, index) => ({ id: `db-event-${index}`, title: row.title, country: countries.find((item) => item.iso2 === row.country_iso2)?.name ?? row.country_iso2 ?? 'Global', city: row.city_name ?? undefined, category: row.category, severity: row.severity, source: row.source, timestamp: row.event_time ?? row.occurred_at, summary: row.summary, recommendedAction: row.recommended_action ?? 'Review source and adapt itinerary controls.', approved: row.status === 'approved' }));
+  return filterRelevantAlerts(mapped, countryIso2, cityName).slice(0, 25);
 }
 
 export async function loadRelevantAdvisories(countryIso2?: string): Promise<Alert[]> {

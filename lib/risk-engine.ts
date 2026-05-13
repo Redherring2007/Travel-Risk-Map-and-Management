@@ -1,4 +1,5 @@
 import type { Alert, CityProfile, Confidence, CountryProfile, DataStatus, RiskCategory, RiskLevel, RiskScore, TravellerProfile, Trip } from './types';
+import { filterRelevantAlerts, scoreEventRelevance } from './event-relevance';
 
 export const riskCategories: RiskCategory[] = [
   'security', 'crime', 'political', 'terrorismConflict', 'kidnapExtortion', 'health',
@@ -92,22 +93,32 @@ function eventDrivers(events: Alert[]) {
   return events.filter((event) => ['High', 'Critical'].includes(event.severity)).slice(0, 6).map((event) => `${event.severity}: ${event.title}`);
 }
 
+function eventPressure(events: Alert[], countryIso2?: string, cityName?: string) {
+  const relevant = filterRelevantAlerts(events, countryIso2, cityName, 50).slice(0, 12);
+  return Math.min(12, relevant.reduce((total, event) => {
+    const relevance = scoreEventRelevance(event, countryIso2, cityName);
+    return total + (severityToScore(event.severity) / 100) * (relevance.relevanceScore / 100) * 5;
+  }, 0));
+}
+
 export function calculateCountryRiskFromSources(input: { country?: CountryProfile | null; advisories?: Alert[]; events?: Alert[]; sourceSummary?: AtlasRiskResult['sourceSummary'] }): AtlasRiskResult {
   const countryScore = input.country?.risk.find((item) => item.category === 'overall')?.value ?? 20;
   const advisoryFloor = Math.max(0, ...(input.advisories ?? []).map((item) => Math.max(severityToScore(item.severity), advisoryLevelToScore(`${item.title} ${item.summary} ${item.recommendedAction}`))));
-  const eventPressure = Math.min(18, (input.events ?? []).reduce((total, item) => total + (severityToScore(item.severity) / 20), 0));
-  const base = Math.max(countryScore, advisoryFloor) + eventPressure;
+  const pressure = eventPressure(input.events ?? [], input.country?.iso2);
+  const base = Math.max(countryScore, advisoryFloor) + pressure;
   const missing = input.country ? [] : ['country profile'];
   const freshness = freshnessConfidence(input.sourceSummary ?? []);
   const finalScore = Math.max(0, Math.min(100, Math.round(base)));
-  return { score: finalScore, level: riskLevel(finalScore), recommendation: recommendationFromScore(finalScore), confidence: confidenceFrom(finalScore, missing, freshness), keyDrivers: [...eventDrivers(input.events ?? []), advisoryFloor ? 'Government advisory floor applied' : 'Baseline country profile'], sourceSummary: input.sourceSummary ?? [], missingData: missing, freshness };
+  const relevantEvents = filterRelevantAlerts(input.events ?? [], input.country?.iso2, undefined, 50);
+  return { score: finalScore, level: riskLevel(finalScore), recommendation: recommendationFromScore(finalScore), confidence: confidenceFrom(finalScore, missing, freshness), keyDrivers: [...eventDrivers(relevantEvents), advisoryFloor ? 'Government advisory floor applied' : 'Baseline country profile'], sourceSummary: input.sourceSummary ?? [], missingData: missing, freshness };
 }
 
 export function calculateCityRiskFromSources(input: { city?: CityProfile | null; events?: Alert[]; countryRisk?: AtlasRiskResult }) {
   const cityScore = input.city?.risk.find((item) => item.category === 'overall')?.value ?? Math.max(20, (input.countryRisk?.score ?? 25) - 8);
-  const eventPressure = Math.max(0, ...(input.events ?? []).filter((event) => event.city === input.city?.name).map((event) => severityToScore(event.severity)));
-  const value = Math.max(cityScore, eventPressure);
-  return { score: value, level: riskLevel(value), drivers: input.city ? [input.city.overview, ...eventDrivers(input.events ?? [])].slice(0, 5) : ['Limited verified city data available'] };
+  const relevant = filterRelevantAlerts(input.events ?? [], input.city?.countryIso2, input.city?.name, 55);
+  const peakEvent = Math.max(0, ...relevant.map((event) => Math.round(severityToScore(event.severity) * (scoreEventRelevance(event, input.city?.countryIso2, input.city?.name).relevanceScore / 100))));
+  const value = Math.max(cityScore, peakEvent);
+  return { score: value, level: riskLevel(value), drivers: input.city ? [input.city.overview, ...eventDrivers(relevant)].slice(0, 5) : ['Limited verified city data available'] };
 }
 
 export function calculateRouteSegmentRisk(input: { segmentName: string; notes?: string; countryRisk?: AtlasRiskResult; cityRiskScore?: number }): RouteSegmentRisk {

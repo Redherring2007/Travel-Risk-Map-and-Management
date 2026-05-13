@@ -151,6 +151,50 @@ export async function generateVisualReportExecutiveSummary(input: {
   }
 }
 
+export async function generateVisualReportNarratives(input: {
+  destination: string;
+  score: number | null;
+  level: string;
+  recommendation: string;
+  confidence: string;
+  executivePosition: string;
+  principalJudgement: string;
+  operationalImpact: string;
+  requiredControlsSummary: string;
+  confidenceNarrative: string;
+  finalRationale: string;
+  keyDrivers: string[];
+  missingData: string[];
+  sourceSummary: string[];
+}): Promise<AiResult> {
+  const status = aiStatus();
+  const sources = input.sourceSummary.filter(Boolean);
+  if (!status.configured) return fallback('AI visual report narrative polish unavailable; deterministic narrative used.', sources);
+  try {
+    const text = await callOpenAi(
+      `${groundedSystem()} Return JSON only with keys executivePosition, principalJudgement, operationalImpact, requiredControlsSummary, confidenceNarrative and finalRationale. Use formal UK English. Use only supplied facts. Do not invent events, advisories, hotels, emergency contacts or scores. Do not include markdown. Each value must be professional sentences, no bullets, maximum 120 words. If evidence is weak, state the confidence limitation.`,
+      JSON.stringify({
+        destination: input.destination,
+        risk: { score: input.score, level: input.level, recommendation: input.recommendation, confidence: input.confidence },
+        currentNarrative: {
+          executivePosition: input.executivePosition,
+          principalJudgement: input.principalJudgement,
+          operationalImpact: input.operationalImpact,
+          requiredControlsSummary: input.requiredControlsSummary,
+          confidenceNarrative: input.confidenceNarrative,
+          finalRationale: input.finalRationale
+        },
+        keyDrivers: input.keyDrivers.slice(0, 6),
+        missingData: input.missingData.slice(0, 8),
+        sourceSummary: sources.slice(0, 8)
+      }, null, 2)
+    );
+    return { configured: true, provider: status.provider, model: status.model, sourceStatus: 'ai_generated', confidence: 'Medium', text, sources };
+  } catch (error) {
+    return { ...fallback('AI visual report narrative polish failed; deterministic narrative used.', sources), error: error instanceof Error ? error.message : 'unknown error' };
+  }
+}
+
 export async function generateTravelRiskReport(input: { trip: Trip; documents: TripDocument[]; assessment: AtlasRiskResult & { routeRisks?: RouteSegmentRisk[]; itineraryRisks?: Record<string, unknown> }; advisories: Alert[]; events: Alert[]; sourceList: string[] }): Promise<AiReportOutput> {
   const status = aiStatus();
   const sourceList = Array.from(new Set(input.sourceList));

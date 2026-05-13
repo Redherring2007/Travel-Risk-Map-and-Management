@@ -1,4 +1,5 @@
 import { alerts } from '@/lib/data';
+import { filterRelevantProviderItems, isFallbackEvent } from '@/lib/event-relevance';
 import { isNeonConfigured, query } from '@/lib/neon';
 import { fetchCanadaTravelAdvice } from '@/lib/providers/canada-travel';
 import { fetchFcdoAdvice } from '@/lib/providers/fcdo';
@@ -64,6 +65,8 @@ async function persistItem(item: ProviderItem) {
     [providerKey, item.provider, item.category, item.title, item.url ?? null, item.countryIso2 ?? null, item.city ?? null, item.confidence, item.sourceStatus, item.publishedAt, item.rawPayload ?? {}]
   ).catch(() => []);
 
+  if (isFallbackEvent(item) || item.category.toLowerCase().includes('provider status')) return true;
+
   if (item.category.toLowerCase().includes('advisory')) {
     await query(
       `insert into advisories (country_iso2, source, level, title, body, url, published_at, source_url, severity, summary, issued_at, status, confidence, raw_payload)
@@ -96,7 +99,10 @@ export async function runIngestion(options: IngestionOptions = {}) {
     } catch (error) {
       result = { provider: providerKey, providerKey, status: 'unavailable', source: providerKey, fetchedAt: new Date().toISOString(), items: [], message: 'Provider failed.', errors: [error instanceof Error ? error.message : 'unknown error'] };
     }
-    const items = dedupe(result.items).map((item) => ({ ...item, providerKey: item.providerKey ?? result.providerKey ?? providerKeyFor(result.provider) }));
+    const deduped = dedupe(result.items).map((item) => ({ ...item, providerKey: item.providerKey ?? result.providerKey ?? providerKeyFor(result.provider) }));
+    const items = result.status === 'live'
+      ? filterRelevantProviderItems(deduped, options.countryIso2, result.providerKey === 'gdelt' ? 55 : 35)
+      : deduped.filter((item) => item.category.toLowerCase().includes('provider status'));
     let stored = 0;
     for (const item of items) if (await persistItem(item)) stored += 1;
     const errors = result.errors ?? [];

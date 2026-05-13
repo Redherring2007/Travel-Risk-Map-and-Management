@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { generateVisualReportExecutiveSummary } from '@/lib/ai';
-import { applyAiExecutiveSummary, buildVisualReportModel } from '@/lib/report-visual-model';
+import { generateVisualReportNarratives } from '@/lib/ai';
+import { applyAiVisualNarratives, buildVisualReportModel } from '@/lib/report-visual-model';
 import { renderVisualReportHtml } from '@/lib/report-visual-renderer';
 import { loadFreshnessSummary, loadRelevantAdvisories, loadRelevantEvents } from '@/lib/source-data';
 import { store } from '@/lib/store';
@@ -29,18 +29,23 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     confidence: assessment?.confidence
   };
   const baseModel = buildVisualReportModel(report, assessment, trip, countryProfile, sources);
-  const aiSummary = await generateVisualReportExecutiveSummary({
+  const aiNarrative = await generateVisualReportNarratives({
     destination: baseModel.executiveSnapshot.destination,
     score: baseModel.riskAtGlance.overallScore,
     level: baseModel.riskAtGlance.overallLevel,
     recommendation: baseModel.goNoGo.recommendation,
     confidence: baseModel.riskAtGlance.confidence,
-    keyReason: baseModel.executiveSnapshot.keyReason,
-    advisory: baseModel.executiveSnapshot.advisory,
+    executivePosition: baseModel.narrative.executivePosition,
+    principalJudgement: baseModel.narrative.principalJudgement,
+    operationalImpact: baseModel.narrative.operationalImpact,
+    requiredControlsSummary: baseModel.narrative.requiredControlsSummary,
+    confidenceNarrative: baseModel.narrative.confidenceNarrative,
+    finalRationale: baseModel.narrative.finalRationale,
+    keyDrivers: baseModel.riskAtGlance.keyDrivers.map((driver) => `${driver.title}: ${driver.detail}`),
     missingData: baseModel.missingDataGroups.flatMap((group) => group.missingItems),
     sourceSummary: baseModel.sourceSummary.map((source) => `${source.title}: ${source.detail}`)
   });
-  const model = aiSummary.configured ? applyAiExecutiveSummary(baseModel, aiSummary.text) : baseModel;
+  const model = aiNarrative.configured ? applyAiVisualNarratives(baseModel, aiNarrative.text) : baseModel;
   const html = renderVisualReportHtml(model);
 
   return new Response(html, {

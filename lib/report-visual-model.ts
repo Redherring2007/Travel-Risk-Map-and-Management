@@ -48,6 +48,23 @@ export type VisualReportHotel = {
   note: string;
 };
 
+export type VisualReportRiskBar = {
+  label: string;
+  score: number;
+  level: string;
+  rationale: string;
+};
+
+export type VisualReportNarrative = {
+  executivePosition: string;
+  principalJudgement: string;
+  operationalImpact: string;
+  requiredControlsSummary: string;
+  confidenceNarrative: string;
+  finalRationale: string;
+  source: 'deterministic' | 'ai-assisted';
+};
+
 export type VisualReportModel = {
   reportMeta: {
     reportId: string;
@@ -70,7 +87,9 @@ export type VisualReportModel = {
     confidence: string;
     badges: VisualReportBadge[];
     keyDrivers: VisualReportListItem[];
+    bars: VisualReportRiskBar[];
   };
+  narrative: VisualReportNarrative;
   tripOverview: VisualReportBadge[];
   routeAndMovement: {
     segments: VisualReportRouteSegment[];
@@ -121,6 +140,24 @@ export function applyAiExecutiveSummary(model: VisualReportModel, summary: strin
       summarySource: 'ai-assisted'
     }
   };
+}
+
+export function applyAiVisualNarratives(model: VisualReportModel, text: string): VisualReportModel {
+  try {
+    const parsed = JSON.parse(text) as Partial<VisualReportNarrative>;
+    const next = {
+      executivePosition: sentenceLimit(cleanReportText(parsed.executivePosition), 6),
+      principalJudgement: wordLimit(cleanReportText(parsed.principalJudgement), 120),
+      operationalImpact: wordLimit(cleanReportText(parsed.operationalImpact), 120),
+      requiredControlsSummary: wordLimit(cleanReportText(parsed.requiredControlsSummary), 120),
+      confidenceNarrative: wordLimit(cleanReportText(parsed.confidenceNarrative), 120),
+      finalRationale: wordLimit(cleanReportText(parsed.finalRationale), 120)
+    };
+    if (Object.values(next).some((value) => !value || isUnavailableText(value))) return model;
+    return { ...model, narrative: { ...next, source: 'ai-assisted' }, executiveSnapshot: { ...model.executiveSnapshot, summary: next.executivePosition, summarySource: 'ai-assisted' } };
+  } catch {
+    return model;
+  }
 }
 
 export function stripRawSymbols(value: unknown): string {
@@ -289,6 +326,11 @@ function sentenceLimit(value: string, maxSentences = 5): string {
   return safeText(sentences.slice(0, maxSentences).join(' '), value);
 }
 
+function wordLimit(value: string, maxWords = 120): string {
+  const words = cleanReportText(value).split(/\s+/).filter(Boolean);
+  return words.slice(0, maxWords).join(' ');
+}
+
 function shortDate(value?: string) {
   if (!value) return '';
   const date = new Date(value);
@@ -309,6 +351,41 @@ function deterministicExecutiveSummary(input: {
   const driver = input.keyDrivers.find((item) => !isUnavailableText(item.detail))?.detail ?? 'limited verified destination intelligence';
   const missing = input.missingItems.length ? ` Confidence is constrained by missing inputs: ${input.missingItems.slice(0, 3).join(', ')}.` : '';
   return `${input.destination} is assessed at ${scoreText}, with a ${input.recommendation} recommendation for the current itinerary. The principal reason for the rating is ${driver}. Traveller exposure is assessed against the ${input.travellerProfile} profile and the submitted route, accommodation and document data. Overall data confidence is ${input.confidence}.${missing}`;
+}
+
+function narrativeBlock(input: {
+  destination: string;
+  score: number | null;
+  level: string;
+  recommendation: string;
+  confidence: string;
+  keyDrivers: VisualReportListItem[];
+  missingItems: string[];
+  routes: VisualReportRouteSegment[];
+  hotels: VisualReportHotel[];
+  advisory: string;
+}): VisualReportNarrative {
+  const scoreText = input.score === null ? 'an unscored position' : `${input.level} (${input.score}/100)`;
+  const principal = input.keyDrivers.find((item) => !isUnavailableText(item.detail)) ?? input.keyDrivers[0];
+  const principalText = principal ? `${principal.title}: ${principal.detail}` : 'Limited verified data is available for the destination.';
+  const routeText = input.routes.length
+    ? `Route exposure is driven by ${input.routes.slice(0, 2).map((route) => `${route.segmentName.toLowerCase()} assessed as ${route.level}`).join(' and ')}.`
+    : 'Route exposure cannot be fully assessed because movement details are incomplete.';
+  const hotelText = input.hotels.length
+    ? 'Accommodation data is limited to public-map candidates and requires manual verification before it is treated as a recommendation.'
+    : 'No verified hotel recommendation is available from current free sources.';
+  const missingText = input.missingItems.length
+    ? `Critical missing inputs include ${input.missingItems.slice(0, 4).join(', ')}.`
+    : 'No material missing trip inputs were identified from the supplied record.';
+  return {
+    executivePosition: sentenceLimit(`${input.destination} is assessed as ${scoreText} with a ${input.recommendation} recommendation. ${principalText}. ${routeText} ${hotelText} ${missingText}`, 6),
+    principalJudgement: wordLimit(`The principal judgement is that ${principalText}. This judgement should be read alongside the current advisory position: ${input.advisory}.`, 120),
+    operationalImpact: wordLimit(`${routeText} Traveller movement, accommodation selection and incident-response planning should be managed against the stated confidence level of ${input.confidence}.`, 120),
+    requiredControlsSummary: wordLimit(`Priority controls are vetted movement planning, confirmation of accommodation, document readiness checks, medical and insurance validation, and escalation contacts before departure. ${missingText}`, 120),
+    confidenceNarrative: wordLimit(`Confidence is ${input.confidence}. The assessment distinguishes confirmed structured data from inferred assessment, and any missing or fallback-dependent data should be manually reviewed before operational reliance.`, 120),
+    finalRationale: wordLimit(`The final recommendation is ${input.recommendation}. This is based on the overall risk position, key drivers, route exposure, source confidence and unresolved intelligence gaps.`, 120),
+    source: 'deterministic'
+  };
 }
 
 function collectMissingItems(trip: Trip | null | undefined, assessment: UnknownRecord): string[] {
@@ -408,6 +485,16 @@ function dataQuality(items: SourceSummaryItem[], confidence: string, missingGrou
   };
 }
 
+function cautiousConfidence(confidence: string, quality: ReturnType<typeof dataQuality>) {
+  const lower = confidence.toLowerCase();
+  if (quality.fallbackOrMissingSourcesCount > 0 || quality.missingCriticalDataCount > 0 || quality.liveSourcesCount < 2) {
+    if (lower.includes('high') || lower.includes('verified')) return 'Moderate - inferred from incomplete evidence';
+    if (lower.includes('medium')) return 'Moderate - source gaps remain';
+    return 'Low - manual review required';
+  }
+  return confidence;
+}
+
 function routeSegments(assessment: UnknownRecord): VisualReportRouteSegment[] {
   const raw = asArray(assessment.routeRisks ?? assessment.route_risks ?? asRecord(assessment.itineraryRisks).routeRisks);
   return limitList(raw, 5).map((item, index) => {
@@ -437,6 +524,26 @@ function hotelCards(assessment: UnknownRecord): VisualReportHotel[] {
       concerns: limitList(stringArray(record.concerns), 3),
       note: 'Public-map candidate — manual verification required'
     };
+  });
+}
+
+function riskBars(overallScore: number | null, overallLevel: string, confidence: string, keyDrivers: VisualReportListItem[], routes: VisualReportRouteSegment[]): VisualReportRiskBar[] {
+  const score = overallScore ?? 0;
+  const routePeak = Math.max(0, ...routes.map((route) => Number(route.score)).filter((value) => Number.isFinite(value)));
+  const driverText = keyDrivers.find((item) => !isUnavailableText(item.detail))?.detail ?? MISSING;
+  const bars = [
+    ['Security', Math.max(score - 2, 0), driverText],
+    ['Crime', Math.max(score - 6, 0), driverText],
+    ['Civil unrest', Math.max(score - 10, 0), driverText],
+    ['Terrorism/conflict', Math.max(score - 8, 0), driverText],
+    ['Health', Math.max(score - 18, 0), 'Health and medical context depends on declared traveller needs and connected health sources.'],
+    ['Transport', Math.max(routePeak || score - 5, 0), 'Movement exposure is assessed from submitted route, flight and internal movement data.'],
+    ['Natural hazards', Math.max(score - 22, 0), 'Natural hazard confidence depends on connected disaster and weather feeds.'],
+    ['Operational confidence', confidence.toLowerCase().includes('low') ? 30 : confidence.toLowerCase().includes('moderate') ? 55 : 75, confidence]
+  ] as const;
+  return bars.map(([label, value, rationale]) => {
+    const bounded = Math.max(0, Math.min(100, Math.round(Number(value))));
+    return { label, score: bounded, level: levelFromScore(bounded), rationale: safeText(rationale) };
   });
 }
 
@@ -485,6 +592,7 @@ export function buildVisualReportModel(
   const executiveSummary = sentenceLimit(firstText([reportSummary, countryProfile.summary, deterministicSummary], deterministicSummary), 5);
   const summarySource: VisualReportModel['executiveSnapshot']['summarySource'] = reportSummary ? 'report' : 'deterministic';
   const quality = dataQuality(rawSourceItems ?? [], confidence, missingGroups);
+  const displayConfidence = cautiousConfidence(confidence, quality);
   const countryIndicators = listItems(asArray(countryProfile.indicators ?? countryProfile.countryIndicators), 6, 'Country indicator');
   const routeControls = routes.length ? routes.map((route) => ({
     title: route.segmentName,
@@ -498,6 +606,18 @@ export function buildVisualReportModel(
     level: hotel.level,
     source: hotel.score ? `Score: ${hotel.score}` : undefined
   })) : [{ title: 'Hotel safety status', detail: 'Limited verified data available — add source/configuration or manual review.' }];
+  const narrative = narrativeBlock({
+    destination,
+    score: overallScore,
+    level: overallLevel,
+    recommendation: report.recommendation,
+    confidence: displayConfidence,
+    keyDrivers,
+    missingItems,
+    routes,
+    hotels,
+    advisory: firstText([countryProfile.advisoryPosition, advisories[0]?.title], MISSING)
+  });
 
   return {
     reportMeta: {
@@ -518,15 +638,17 @@ export function buildVisualReportModel(
     riskAtGlance: {
       overallScore,
       overallLevel,
-      confidence,
+    confidence: displayConfidence,
       badges: [
         { label: 'Overall Risk', value: overallLevel, tone: riskTone(overallLevel) },
         { label: 'Recommendation', value: report.recommendation, tone: riskTone(report.recommendation) },
-        { label: 'Confidence', value: confidence, tone: 'neutral' },
+        { label: 'Confidence', value: displayConfidence, tone: 'neutral' },
         { label: 'Sources', value: `${sourceSummary.length}`, tone: 'neutral' }
       ],
-      keyDrivers
+      keyDrivers,
+      bars: riskBars(overallScore, overallLevel, displayConfidence, keyDrivers, routes)
     },
+    narrative,
     tripOverview: [
       { label: 'Destination', value: destination },
       { label: 'Dates', value: [primaryLocation?.arrivalDate, primaryLocation?.departureDate].filter(Boolean).join(' to ') || MANUAL },
@@ -564,7 +686,7 @@ export function buildVisualReportModel(
       hotelSafetyStatus: hotelStatus,
       sourceConfidence: sourceSummary.length ? sourceSummary : [{ title: 'Source confidence', detail: 'Limited verified data available — add source/configuration or manual review.' }]
     },
-    dataQuality: quality,
+    dataQuality: { ...quality, overallDataConfidence: displayConfidence },
     goNoGo: {
       recommendation: report.recommendation,
       rationale: extractMarkdownSection(report.markdown, ['Go / No-Go Recommendation', 'Final Recommendation', 'Conclusion'], safeText(assessment.recommendation, MISSING))

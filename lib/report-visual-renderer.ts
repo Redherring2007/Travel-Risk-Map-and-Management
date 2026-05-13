@@ -1,4 +1,4 @@
-import type { VisualReportBadge, VisualReportHotel, VisualReportListItem, VisualReportMissingGroup, VisualReportModel, VisualReportRouteSegment } from './report-visual-model';
+import type { VisualReportHotel, VisualReportListItem, VisualReportMissingGroup, VisualReportModel, VisualReportRiskBar, VisualReportRouteSegment } from './report-visual-model';
 
 function escapeHtml(value: unknown): string {
   return String(value ?? '')
@@ -11,7 +11,7 @@ function escapeHtml(value: unknown): string {
 
 function formatDate(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? escapeHtml(value) : date.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+  return Number.isNaN(date.getTime()) ? escapeHtml(value) : date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function toneClass(value?: string): string {
@@ -23,87 +23,96 @@ function toneClass(value?: string): string {
   return 'neutral';
 }
 
-function icon(name: string): string {
-  const paths: Record<string, string> = {
-    shield: '<path d="M12 3l7 3v5c0 5-3.4 8.6-7 10-3.6-1.4-7-5-7-10V6l7-3z"/>',
-    route: '<path d="M5 19c4-7 10 1 14-6"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="13" r="2"/>',
-    hotel: '<path d="M4 20V6h8v14"/><path d="M12 10h8v10"/><path d="M7 9h2M7 13h2M15 14h2"/>',
-    medical: '<path d="M12 5v14M5 12h14"/>',
-    alert: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 9v5M12 17h.01"/>',
-    source: '<path d="M6 4h9l3 3v13H6z"/><path d="M15 4v4h4M8 12h8M8 16h8"/>'
-  };
-  return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name] ?? paths.shield}</svg>`;
+function section(title: string, body: string, wide = false): string {
+  return `<section class="section ${wide ? 'wide' : ''}"><div class="section-head"><h2>${escapeHtml(title)}</h2></div>${body}</section>`;
 }
 
-function badge(item: VisualReportBadge): string {
-  return `<div class="metric ${item.tone ?? toneClass(item.value)}"><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(item.value)}</strong></div>`;
+function infoPair(label: string, value: unknown): string {
+  return `<div class="info-pair"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
 }
 
-function itemCard(item: VisualReportListItem): string {
-  return `<article class="item-card ${toneClass(item.level)}">
-    <div class="item-head"><strong>${escapeHtml(item.title)}</strong>${item.level ? `<span>${escapeHtml(item.level)}</span>` : ''}</div>
-    <p>${escapeHtml(item.detail)}</p>
-    ${(item.meta || item.source) ? `<small>${escapeHtml([item.meta, item.source].filter(Boolean).join(' | '))}</small>` : ''}
-  </article>`;
+function judgementCard(title: string, body: string, tone = 'neutral'): string {
+  return `<article class="judgement ${toneClass(tone)}"><span>${escapeHtml(title)}</span><p>${escapeHtml(body)}</p></article>`;
 }
 
-function section(title: string, iconName: string, body: string): string {
-  return `<section class="panel"><div class="section-title">${icon(iconName)}<h2>${escapeHtml(title)}</h2></div>${body}</section>`;
+function riskBar(bar: VisualReportRiskBar): string {
+  return `<div class="risk-bar-row">
+    <div class="risk-bar-label"><strong>${escapeHtml(bar.label)}</strong><small>${escapeHtml(bar.level)}</small></div>
+    <div class="risk-track"><div class="risk-fill ${toneClass(bar.level)}" style="width:${Math.max(4, Math.min(100, bar.score))}%"></div></div>
+    <div class="risk-score">${escapeHtml(bar.score)}</div>
+    <p>${escapeHtml(bar.rationale)}</p>
+  </div>`;
 }
 
 function routeTable(segments: VisualReportRouteSegment[]): string {
-  if (!segments.length) return '<div class="missing-card">Manual verification required</div>';
-  return `<table class="route-table"><thead><tr><th>Segment</th><th>From</th><th>To</th><th>Risk</th><th>Mitigation</th></tr></thead><tbody>${segments.map((segment) => `<tr>
-    <td><strong>${escapeHtml(segment.segmentName)}</strong><small>${escapeHtml(segment.confidence)}</small></td>
-    <td>${escapeHtml(segment.from)}</td>
-    <td>${escapeHtml(segment.to)}</td>
-    <td><span class="pill ${toneClass(segment.level)}">${escapeHtml(segment.level)} ${escapeHtml(segment.score)}</span></td>
+  if (!segments.length) return `<div class="empty-state">Manual verification required. Add confirmed route, flight and movement details to produce route-specific controls.</div>`;
+  return `<table class="data-table route-table"><thead><tr><th>Route</th><th>Score</th><th>Level</th><th>Control</th></tr></thead><tbody>${segments.slice(0, 5).map((segment) => `<tr>
+    <td><strong>${escapeHtml(segment.segmentName)}</strong><small>${escapeHtml(segment.from)} to ${escapeHtml(segment.to)}</small></td>
+    <td class="numeric">${escapeHtml(segment.score)}</td>
+    <td><span class="pill ${toneClass(segment.level)}">${escapeHtml(segment.level)}</span></td>
     <td>${escapeHtml(segment.mitigation)}</td>
   </tr>`).join('')}</tbody></table>`;
 }
 
-function hotelCards(hotels: VisualReportHotel[], note: string): string {
-  const cards = hotels.length ? hotels.map((hotel) => `<article class="hotel-card ${toneClass(hotel.level)}">
-    <div class="item-head"><strong>${escapeHtml(hotel.name)}</strong><span>${escapeHtml(hotel.level)} ${escapeHtml(hotel.score)}</span></div>
+function hotelSection(hotels: VisualReportHotel[], note: string): string {
+  if (!hotels.length) return `<div class="empty-state">No verified hotel recommendation available from current free sources. Manual accommodation review is required.</div><p class="note">${escapeHtml(note)}</p>`;
+  return `<div class="hotel-list">${hotels.slice(0, 3).map((hotel) => `<article class="hotel-row">
+    <div><strong>${escapeHtml(hotel.name)}</strong><small>Public-map candidate — manual verification required</small></div>
+    <div><span class="pill ${toneClass(hotel.level)}">${escapeHtml(hotel.level)} ${escapeHtml(hotel.score)}</span></div>
     <p>${escapeHtml(hotel.note)}</p>
-    <div class="split-list"><div><b>Strengths</b>${(hotel.strengths.length ? hotel.strengths : ['Manual verification required']).map((item) => `<small>${escapeHtml(item)}</small>`).join('')}</div><div><b>Concerns</b>${(hotel.concerns.length ? hotel.concerns : ['Limited verified data available']).map((item) => `<small>${escapeHtml(item)}</small>`).join('')}</div></div>
-  </article>`).join('') : '<div class="missing-card">No verified hotel recommendations available from free sources. Manual verification required.</div>';
-  return `<div class="hotel-grid">${cards}</div><p class="section-note">${escapeHtml(note)}</p>`;
+  </article>`).join('')}</div><p class="note">${escapeHtml(note)}</p>`;
 }
 
-function missingDataCards(groups: VisualReportMissingGroup[]): string {
-  return `<div class="missing-grid">${groups.map((group) => `<article class="missing-action-card">
-    <div class="item-head"><strong>${escapeHtml(group.category)}</strong><span>${escapeHtml(group.missingItems.length ? `${group.missingItems.length} input${group.missingItems.length === 1 ? '' : 's'}` : 'Review')}</span></div>
-    <div class="missing-tags">${group.missingItems.map((item) => `<small>${escapeHtml(item)}</small>`).join('')}</div>
-    <p><b>Why it matters:</b> ${escapeHtml(group.whyItMatters)}</p>
-    <p><b>Add next:</b> ${escapeHtml(group.whatToAdd)}</p>
-    <p><b>Confidence effect:</b> ${escapeHtml(group.confidenceImpact)}</p>
+function proseCard(title: string, items: VisualReportListItem[]): string {
+  const item = items.find((entry) => !/limited verified data|manual verification/i.test(entry.detail)) ?? items[0];
+  return `<article class="prose-card"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(item?.detail ?? 'Limited verified data available.')}</p>${item?.source || item?.meta ? `<small>${escapeHtml([item.meta, item.source].filter(Boolean).join(' | '))}</small>` : ''}</article>`;
+}
+
+function advisoryEventList(advisories: VisualReportListItem[], events: VisualReportListItem[]): string {
+  const items = [...advisories.slice(0, 3), ...events.slice(0, 6)].slice(0, 6);
+  if (!items.length) return '<div class="empty-state">Limited verified data available. No relevant advisory or event evidence is available for this report.</div>';
+  return `<div class="event-list">${items.map((item) => `<article>
+    <div><strong>${escapeHtml(item.title)}</strong>${item.level ? `<span class="pill ${toneClass(item.level)}">${escapeHtml(item.level)}</span>` : ''}</div>
+    <p>${escapeHtml(item.detail)}</p>
+    <small>${escapeHtml([item.meta, item.source].filter(Boolean).join(' | '))}</small>
   </article>`).join('')}</div>`;
 }
 
-function dataQualityPanel(model: VisualReportModel): string {
+function missingGroups(groups: VisualReportMissingGroup[]): string {
+  return `<div class="gap-grid">${groups.map((group) => `<article>
+    <h3>${escapeHtml(group.category)}</h3>
+    <p>${escapeHtml(group.missingItems.slice(0, 4).join(', ') || 'No material gap identified.')}</p>
+    <small>${escapeHtml(group.whatToAdd)} ${escapeHtml(group.confidenceImpact)}</small>
+  </article>`).join('')}</div>`;
+}
+
+function mitigationPlan(model: VisualReportModel): string {
+  const controls = [
+    ['Before travel', model.narrative.requiredControlsSummary],
+    ['Arrival', model.routeAndMovement.note],
+    ['Daily movement', model.routeAndMovement.segments[0]?.mitigation ?? 'Use movement controls proportionate to the assessed route and destination risk.'],
+    ['Incident response', model.narrative.confidenceNarrative]
+  ];
+  return `<ol class="priority-list">${controls.map(([title, body]) => `<li><strong>${escapeHtml(title)}</strong><p>${escapeHtml(body)}</p></li>`).join('')}</ol>`;
+}
+
+function sourceFooter(items: VisualReportListItem[]): string {
+  return `<div class="source-grid">${items.slice(0, 8).map((item) => `<div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml([item.detail, item.meta, item.source].filter(Boolean).join(' | '))}</span></div>`).join('')}</div>`;
+}
+
+function dataQualityStrip(model: VisualReportModel): string {
   const quality = model.dataQuality;
-  return `<div class="quality-layout">
-    <div class="quality-score">
-      <span>Data Quality</span>
-      <strong>${escapeHtml(quality.overallDataConfidence)}</strong>
-      <small>Latest source: ${formatDate(quality.latestSourceDate)}</small>
-    </div>
-    <div class="metric-row compact">
-      ${badge({ label: 'Live sources', value: String(quality.liveSourcesCount), tone: 'low' })}
-      ${badge({ label: 'Fallback / missing', value: String(quality.fallbackOrMissingSourcesCount), tone: quality.fallbackOrMissingSourcesCount ? 'moderate' : 'low' })}
-      ${badge({ label: 'Visible sources', value: String(model.sourceSummary.length), tone: 'neutral' })}
-      ${badge({ label: 'Events shown', value: String(model.latestEvents.length), tone: 'neutral' })}
-    </div>
-    <div class="cards">${quality.recommendedNextInputs.slice(0, 5).map((item) => itemCard({ title: 'Recommended next input', detail: item })).join('')}</div>
+  return `<div class="quality-strip">
+    ${infoPair('Live sources', quality.liveSourcesCount)}
+    ${infoPair('Fallback / missing', quality.fallbackOrMissingSourcesCount)}
+    ${infoPair('Latest source', formatDate(quality.latestSourceDate))}
+    ${infoPair('Confidence', quality.overallDataConfidence)}
+    ${infoPair('Manual review', quality.missingCriticalDataCount > 0 ? 'Required' : 'Monitor')}
   </div>`;
 }
 
-function compactDetailCards(items: VisualReportListItem[]): string {
-  return `<div class="compact-detail-grid">${items.slice(0, 6).map(itemCard).join('')}</div>`;
-}
-
 export function renderVisualReportHtml(model: VisualReportModel): string {
+  const overview = Object.fromEntries(model.tripOverview.map((item) => [item.label, item.value]));
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -111,113 +120,129 @@ export function renderVisualReportHtml(model: VisualReportModel): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(model.reportMeta.title)}</title>
 <style>
-  :root { --navy:#08111f; --navy2:#0d1b2d; --ink:#172033; --muted:#607089; --line:#dce3ea; --gold:#b88a35; --gold2:#e1b76a; --paper:#f6f7f9; --low:#16794a; --moderate:#b88916; --high:#c85d1c; --critical:#b3261e; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:#d8dde5; color:var(--ink); font-family: Arial, Helvetica, sans-serif; line-height:1.45; }
-  .report { max-width:1280px; margin:0 auto; background:white; min-height:100vh; box-shadow:0 24px 70px rgba(8,17,31,.22); }
-  .hero { background:linear-gradient(135deg,var(--navy),var(--navy2)); color:white; padding:34px 42px; border-bottom:4px solid var(--gold); }
-  .brand { display:flex; justify-content:space-between; gap:24px; align-items:flex-start; text-transform:uppercase; letter-spacing:.08em; font-size:12px; color:var(--gold2); }
-  h1 { margin:26px 0 8px; font-size:42px; line-height:1.05; letter-spacing:0; }
-  .subtitle { max-width:820px; color:#d7e1ec; font-size:16px; }
-  .hero-grid { display:grid; grid-template-columns: 1.45fr .8fr; gap:24px; margin-top:26px; align-items:stretch; }
-  .score-card { background:rgba(255,255,255,.08); border:1px solid rgba(225,183,106,.34); border-radius:18px; padding:22px; display:grid; grid-template-columns:160px 1fr; gap:22px; min-height:0; }
-  .score-number { font-size:70px; line-height:.92; font-weight:800; color:var(--gold2); }
-  .score-label { color:#b7c5d5; font-size:12px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; }
-  .score-summary { color:#e6edf6; font-size:14px; margin:10px 0 12px; }
-  .score-reason { border-left:2px solid var(--gold); padding-left:12px; color:#d5dfeb; font-size:13px; margin:0; }
-  .score-mini { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
-  .recommendation { display:inline-flex; padding:7px 10px; border-radius:999px; background:rgba(225,183,106,.16); color:var(--gold2); font-weight:700; font-size:12px; }
-  .meta-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-  .meta { background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.1); border-radius:12px; padding:12px; }
-  .meta span, .metric span { display:block; color:#8fa1b7; font-size:11px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:5px; }
-  .meta strong, .metric strong { font-size:15px; color:inherit; }
-  main { padding:30px 42px 42px; background:var(--paper); }
-  .grid { display:grid; grid-template-columns:repeat(12,1fr); gap:18px; }
-  .panel { grid-column:span 6; background:white; border:1px solid var(--line); border-radius:18px; padding:20px; break-inside:avoid; box-shadow:0 10px 30px rgba(23,32,51,.06); }
-  .panel.wide { grid-column:span 12; }
-  .section-title { display:flex; align-items:center; gap:10px; margin-bottom:14px; border-bottom:1px solid var(--line); padding-bottom:12px; }
-  .section-title svg { width:22px; height:22px; stroke:var(--gold); fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; flex:none; }
-  h2 { margin:0; font-size:18px; letter-spacing:0; }
-  h3 { margin:16px 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:#5b6a7e; }
-  p { margin:0 0 12px; color:#33425a; }
-  .metric-row { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
-  .metric-row.compact { grid-template-columns:repeat(4,minmax(0,1fr)); margin-bottom:12px; }
-  .metric { border-radius:14px; padding:14px; background:#f8fafc; border:1px solid var(--line); min-height:82px; }
-  .metric.low, .pill.low { border-color:rgba(22,121,74,.32); color:var(--low); }
-  .metric.moderate, .pill.moderate { border-color:rgba(184,137,22,.36); color:var(--moderate); }
-  .metric.high, .pill.high { border-color:rgba(200,93,28,.36); color:var(--high); }
-  .metric.critical, .pill.critical { border-color:rgba(179,38,30,.36); color:var(--critical); }
-  .cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
-  .item-card, .hotel-card, .missing-card { border:1px solid var(--line); border-radius:14px; padding:14px; background:#fbfcfe; }
-  .item-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:8px; }
-  .item-head span, .pill { border:1px solid currentColor; border-radius:999px; padding:3px 8px; font-size:11px; font-weight:700; white-space:nowrap; }
-  small { display:block; color:var(--muted); font-size:12px; margin-top:6px; }
-  .route-table { width:100%; border-collapse:separate; border-spacing:0; overflow:hidden; border-radius:14px; border:1px solid var(--line); }
-  th, td { padding:12px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; font-size:13px; }
-  th { background:#f2f5f8; color:#4d5d73; text-transform:uppercase; letter-spacing:.05em; font-size:11px; }
-  tr:last-child td { border-bottom:0; }
-  .hotel-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
-  .missing-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
-  .missing-action-card { border:1px solid #e2d3ad; border-radius:14px; padding:14px; background:#fffaf0; }
-  .missing-tags { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 10px; }
-  .missing-tags small { margin:0; padding:4px 8px; background:white; border:1px solid #eadbb9; border-radius:999px; color:#735517; }
-  .compact-detail-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
-  .quality-layout { display:grid; grid-template-columns:240px 1fr; gap:16px; align-items:start; }
-  .quality-score { border-radius:16px; background:linear-gradient(135deg,#101e31,#172a43); color:white; padding:18px; min-height:150px; }
-  .quality-score span { display:block; color:var(--gold2); text-transform:uppercase; letter-spacing:.07em; font-size:11px; }
-  .quality-score strong { display:block; margin:12px 0; font-size:32px; }
-  .split-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:12px; }
-  .split-list b { display:block; font-size:12px; margin-bottom:4px; color:#243149; }
-  .section-note { margin-top:12px; color:var(--muted); font-size:13px; }
-  .map-panel { min-height:220px; border-radius:16px; background:linear-gradient(135deg,#edf1f5,#ffffff); border:1px dashed #b8c2cf; display:flex; align-items:center; justify-content:center; color:var(--muted); text-align:center; padding:20px; }
-  .footer { margin-top:18px; padding:18px 42px 30px; background:white; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
-  @media (max-width:900px) { .hero-grid, .score-card, .metric-row, .hotel-grid, .missing-grid, .compact-detail-grid, .quality-layout, .cards, .meta-grid { grid-template-columns:1fr; } .panel { grid-column:span 12; } h1 { font-size:32px; } main, .hero { padding-left:22px; padding-right:22px; } }
-  @media print { @page { size:A4 landscape; margin:10mm; } body { background:white; } .report { box-shadow:none; max-width:none; } .panel, .score-card, .item-card, .hotel-card { break-inside:avoid; } main { padding:18px; } .hero { padding:22px; } }
+  :root { --navy:#07111f; --navy2:#101c2f; --ink:#172033; --muted:#627186; --line:#dce2ea; --gold:#b88a35; --gold2:#dfb868; --paper:#f4f6f8; --low:#16794a; --moderate:#ad7d14; --high:#bd5b1f; --critical:#a92822; }
+  * { box-sizing:border-box; min-width:0; }
+  body { margin:0; background:#d9dee6; color:var(--ink); font-family:Arial, Helvetica, sans-serif; line-height:1.42; }
+  .report { max-width:1180px; margin:0 auto; background:white; box-shadow:0 22px 60px rgba(7,17,31,.18); }
+  .header { background:linear-gradient(135deg,var(--navy),var(--navy2)); color:white; padding:26px 34px 28px; border-bottom:4px solid var(--gold); }
+  .brand-line { display:flex; justify-content:space-between; gap:20px; color:var(--gold2); text-transform:uppercase; letter-spacing:.08em; font-size:11px; }
+  .header h1 { margin:20px 0 4px; font-size:34px; line-height:1.05; letter-spacing:0; }
+  .report-meta { color:#cbd7e5; font-size:12px; }
+  .hero { display:grid; grid-template-columns:65fr 35fr; gap:18px; margin-top:22px; }
+  .hero-main, .hero-side { border:1px solid rgba(223,184,104,.28); background:rgba(255,255,255,.075); border-radius:14px; padding:18px; }
+  .risk-lockup { display:grid; grid-template-columns:128px 1fr; gap:18px; align-items:start; }
+  .score { color:var(--gold2); font-size:72px; line-height:.9; font-weight:800; }
+  .risk-label { display:block; color:#95a8bd; font-size:10px; text-transform:uppercase; letter-spacing:.08em; margin-bottom:6px; }
+  .hero-main h2 { margin:0 0 8px; color:white; font-size:22px; }
+  .hero-main p { color:#e3ebf5; margin:0 0 10px; font-size:14px; }
+  .hero-drivers { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
+  .hero-drivers div { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.1); border-radius:10px; padding:9px; color:#dce6f1; font-size:12px; }
+  .hero-side { display:flex; flex-direction:column; gap:10px; }
+  .fact-row { display:grid; grid-template-columns:112px 1fr; gap:10px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,.1); font-size:12px; }
+  .fact-row span { color:#98a9bc; text-transform:uppercase; letter-spacing:.06em; font-size:10px; }
+  .fact-row strong { color:white; font-weight:700; overflow-wrap:anywhere; }
+  .badge-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  .badge, .pill { display:inline-flex; align-items:center; border:1px solid currentColor; border-radius:999px; padding:4px 8px; font-size:11px; font-weight:700; }
+  .badge { color:var(--gold2); background:rgba(223,184,104,.12); }
+  main { background:var(--paper); padding:22px 30px 30px; display:grid; grid-template-columns:repeat(12,1fr); gap:14px; }
+  .section { grid-column:span 6; background:white; border:1px solid var(--line); border-radius:14px; padding:16px; page-break-inside:avoid; break-inside:avoid; box-shadow:0 8px 24px rgba(23,32,51,.055); }
+  .section.wide { grid-column:span 12; }
+  .section-head { border-bottom:1px solid var(--line); margin:-2px 0 12px; padding-bottom:8px; }
+  .section h2 { margin:0; font-size:16px; letter-spacing:0; }
+  .section h3 { margin:0 0 6px; font-size:13px; }
+  p { margin:0; overflow-wrap:anywhere; }
+  small { display:block; color:var(--muted); font-size:11px; margin-top:5px; overflow-wrap:anywhere; }
+  .quality-strip { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin-top:12px; }
+  .info-pair { background:#f7f9fb; border:1px solid var(--line); border-radius:10px; padding:9px; }
+  .info-pair span { display:block; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-size:10px; margin-bottom:4px; }
+  .info-pair strong { font-size:13px; overflow-wrap:anywhere; }
+  .risk-bars { display:grid; gap:9px; }
+  .risk-bar-row { display:grid; grid-template-columns:150px 1fr 44px; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid #edf1f5; }
+  .risk-bar-row:last-child { border-bottom:0; }
+  .risk-bar-row p { grid-column:2 / 4; color:var(--muted); font-size:12px; }
+  .risk-bar-label small { color:var(--muted); font-size:11px; }
+  .risk-track { height:9px; border-radius:999px; background:#e8edf3; overflow:hidden; }
+  .risk-fill { height:100%; border-radius:999px; background:var(--muted); }
+  .risk-score { text-align:right; font-weight:800; color:var(--ink); }
+  .low { color:var(--low); } .moderate { color:var(--moderate); } .high { color:var(--high); } .critical { color:var(--critical); }
+  .risk-fill.low { background:var(--low); } .risk-fill.moderate { background:var(--moderate); } .risk-fill.high { background:var(--high); } .risk-fill.critical { background:var(--critical); }
+  .judgement-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .judgement { border:1px solid var(--line); border-left:4px solid var(--gold); border-radius:12px; padding:14px; background:#fbfcfe; min-height:150px; }
+  .judgement span { display:block; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-size:10px; margin-bottom:8px; }
+  .data-table { width:100%; border-collapse:collapse; table-layout:fixed; }
+  th, td { padding:10px; border-bottom:1px solid var(--line); vertical-align:top; text-align:left; font-size:12px; overflow-wrap:anywhere; }
+  th { background:#f3f6f9; color:#596a80; text-transform:uppercase; letter-spacing:.05em; font-size:10px; }
+  .numeric { font-weight:800; width:68px; }
+  .route-table th:nth-child(1) { width:28%; } .route-table th:nth-child(2) { width:8%; } .route-table th:nth-child(3) { width:12%; }
+  .hotel-list, .event-list, .source-grid, .gap-grid { display:grid; gap:10px; }
+  .hotel-row { display:grid; grid-template-columns:1.3fr auto 2fr; gap:12px; align-items:start; border:1px solid var(--line); border-radius:12px; padding:12px; background:#fbfcfe; }
+  .prose-pair { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .prose-card { border:1px solid var(--line); border-radius:12px; padding:14px; background:#fbfcfe; min-height:130px; }
+  .event-list article { border:1px solid var(--line); border-radius:10px; padding:10px; background:#fbfcfe; }
+  .event-list article div { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; margin-bottom:5px; }
+  .gap-grid { grid-template-columns:repeat(3,1fr); }
+  .gap-grid article { border:1px solid #eadab9; background:#fffaf0; border-radius:10px; padding:11px; }
+  .priority-list { margin:0; padding-left:22px; display:grid; gap:9px; }
+  .priority-list li { padding-left:4px; }
+  .priority-list p { color:#3b4a5f; font-size:13px; margin-top:3px; }
+  .final-card { border-radius:14px; padding:18px; background:linear-gradient(135deg,#0e1b2c,#172a43); color:white; }
+  .final-card h3 { margin:0 0 8px; color:var(--gold2); font-size:22px; }
+  .final-card p { color:#e4edf6; }
+  .source-grid { grid-template-columns:repeat(4,1fr); }
+  .source-grid div { border-top:1px solid var(--line); padding-top:8px; }
+  .source-grid span { display:block; color:var(--muted); font-size:11px; margin-top:3px; overflow-wrap:anywhere; }
+  .empty-state, .note { color:var(--muted); font-size:13px; }
+  .note { margin-top:8px; }
+  .footer { padding:16px 30px 24px; color:var(--muted); font-size:11px; border-top:1px solid var(--line); }
+  @media (max-width:900px) { .hero, .risk-lockup, .quality-strip, .judgement-grid, .prose-pair, .hotel-row, .gap-grid, .source-grid { grid-template-columns:1fr; } main { grid-template-columns:1fr; padding:16px; } .section, .section.wide { grid-column:1; } .risk-bar-row { grid-template-columns:1fr 1fr 44px; } .risk-bar-row p { grid-column:1 / 4; } }
+  @media print { @page { size:A4; margin:11mm; } body { background:white; } .report { max-width:none; box-shadow:none; } .header { padding:18px 22px; } main { padding:14px; gap:10px; } .section { box-shadow:none; padding:12px; page-break-inside:avoid; break-inside:avoid; } .hero-main, .hero-side, .judgement, .prose-card, .hotel-row, .event-list article, .gap-grid article { page-break-inside:avoid; break-inside:avoid; } .score { font-size:56px; } }
 </style>
 </head>
 <body>
 <div class="report">
-  <header class="hero">
-    <div class="brand"><strong>Atlas Insight</strong><span>Report ID ${escapeHtml(model.reportMeta.reportId)} | Generated ${formatDate(model.reportMeta.generatedAt)}</span></div>
-    <h1>Travel Risk Report</h1>
-    <p class="subtitle">${escapeHtml(model.executiveSnapshot.summary)}</p>
-    <div class="hero-grid">
-      <div class="score-card">
-        <div>
-          <div class="score-label">Overall Risk Rating</div>
-          <div class="score-number">${escapeHtml(model.riskAtGlance.overallScore ?? 'N/A')}</div>
-          <strong>${escapeHtml(model.riskAtGlance.overallLevel)}</strong>
-          <div class="score-mini"><span class="recommendation">${escapeHtml(model.goNoGo.recommendation)}</span><span class="recommendation">${escapeHtml(model.riskAtGlance.confidence)} confidence</span></div>
+  <header class="header">
+    <div class="brand-line"><strong>Atlas Insight</strong><span>Report ID ${escapeHtml(model.reportMeta.reportId)}</span></div>
+    <h1>${escapeHtml(model.reportMeta.title || 'Travel Risk Report')}</h1>
+    <div class="report-meta">Generated ${formatDate(model.reportMeta.generatedAt)} | Valid until ${formatDate(model.reportMeta.validUntil)}</div>
+    <div class="hero">
+      <div class="hero-main">
+        <div class="risk-lockup">
+          <div>
+            <span class="risk-label">Overall Risk Score</span>
+            <div class="score">${escapeHtml(model.riskAtGlance.overallScore ?? 'N/A')}</div>
+            <div class="badge-row"><span class="badge">${escapeHtml(model.riskAtGlance.overallLevel)}</span><span class="badge">${escapeHtml(model.goNoGo.recommendation)}</span></div>
+          </div>
+          <div>
+            <span class="risk-label">Executive Position ${model.narrative.source === 'ai-assisted' ? '| AI-assisted from sourced data' : '| Deterministic'}</span>
+            <h2>${escapeHtml(model.executiveSnapshot.destination)}</h2>
+            <p>${escapeHtml(model.narrative.executivePosition)}</p>
+          </div>
         </div>
-        <div>
-          <div class="score-label">Executive summary ${model.executiveSnapshot.summarySource === 'ai-assisted' ? '| AI-assisted from sourced data' : '| sourced report data'}</div>
-          <p class="score-summary">${escapeHtml(model.executiveSnapshot.summary)}</p>
-          <p class="score-reason"><strong>Key reason:</strong> ${escapeHtml(model.executiveSnapshot.keyReason)}</p>
-        </div>
+        <div class="hero-drivers">${model.riskAtGlance.keyDrivers.slice(0, 3).map((driver) => `<div><strong>${escapeHtml(driver.title)}</strong><br/>${escapeHtml(driver.detail)}</div>`).join('')}</div>
       </div>
-      <div class="meta-grid">${model.tripOverview.slice(0, 6).map((item) => `<div class="meta"><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(item.value)}</strong></div>`).join('')}</div>
+      <aside class="hero-side">
+        ${infoPair('Destination', overview.Destination ?? model.executiveSnapshot.destination)}
+        ${infoPair('Dates', overview.Dates ?? 'Manual verification required')}
+        ${infoPair('Purpose', overview.Purpose ?? 'Manual verification required')}
+        ${infoPair('Confidence', model.riskAtGlance.confidence)}
+        ${infoPair('Missing critical inputs', model.dataQuality.missingCriticalDataCount)}
+      </aside>
     </div>
   </header>
-  <main class="grid">
-    ${section('Executive Snapshot', 'shield', `<p>${escapeHtml(model.executiveSnapshot.summary)}</p><div class="cards">${itemCard({ title: 'Current advisory', detail: model.executiveSnapshot.advisory })}${itemCard({ title: 'Key issue', detail: model.executiveSnapshot.keyIssue })}</div>`)}
-    ${section('Risk at a Glance', 'alert', `<div class="metric-row">${model.riskAtGlance.badges.map(badge).join('')}</div><div class="cards" style="margin-top:12px">${model.riskAtGlance.keyDrivers.map(itemCard).join('')}</div>`)}
-    ${section('Trip Overview', 'source', `<div class="metric-row">${model.tripOverview.map(badge).join('')}</div>`)}
-    ${section('Data Quality', 'source', dataQualityPanel(model)).replace('class="panel"', 'class="panel wide"')}
-    ${section('Route and Movement', 'route', `${routeTable(model.routeAndMovement.segments)}<p class="section-note">${escapeHtml(model.routeAndMovement.note)}</p>`).replace('class="panel"', 'class="panel wide"')}
-    ${section('Accommodation Safety', 'hotel', hotelCards(model.accommodationSafety.hotels, model.accommodationSafety.note)).replace('class="panel"', 'class="panel wide"')}
-    ${section('Health and Medical', 'medical', `<div class="cards">${model.healthAndMedical.map(itemCard).join('')}</div>`)}
-    ${section('Emergency and Consular', 'shield', `<div class="cards">${model.emergencyAndConsular.map(itemCard).join('')}</div>`)}
-    ${section('Operational Detail Cards', 'shield', `<h3>Official advisories</h3>${compactDetailCards(model.dataDepth.officialAdvisories)}<h3>Country indicators</h3>${compactDetailCards(model.dataDepth.countryIndicators)}<h3>Route / movement controls</h3>${compactDetailCards(model.dataDepth.routeMovementControls)}<h3>Hotel safety status</h3>${compactDetailCards(model.dataDepth.hotelSafetyStatus)}<h3>Source confidence</h3>${compactDetailCards(model.dataDepth.sourceConfidence)}`).replace('class="panel"', 'class="panel wide"')}
-    ${section('Current Advisories', 'alert', `<div class="cards">${model.advisories.map(itemCard).join('')}</div>`)}
-    ${section('Latest Relevant Events', 'alert', `<div class="cards">${model.latestEvents.map(itemCard).join('')}</div>`)}
-    ${section('Map / Area Risk', 'route', `<div class="map-panel">Structured map image not embedded in this report. Use the Atlas Insight Risk Map for live geographic exploration. Report data is limited to sourced itinerary and assessment records.</div>`)}
-    ${section('Intelligence Gaps', 'source', `<div class="cards">${model.intelligenceGaps.map(itemCard).join('')}</div>`)}
-    ${section('Missing Data Inputs', 'source', missingDataCards(model.missingDataGroups)).replace('class="panel"', 'class="panel wide"')}
-    ${section('Mitigation Plan', 'shield', `<div class="cards">${model.mitigationPlan.map(itemCard).join('')}</div>`)}
-    ${section('Go / No-Go', 'alert', `<p><strong>${escapeHtml(model.goNoGo.recommendation)}</strong></p><p>${escapeHtml(model.goNoGo.rationale)}</p>`)}
-    ${section('Source Summary', 'source', `<div class="cards">${model.sourceSummary.map(itemCard).join('')}</div>`).replace('class="panel"', 'class="panel wide"')}
+  <main>
+    ${section('Risk at a Glance', `<div class="risk-bars">${model.riskAtGlance.bars.slice(0, 8).map(riskBar).join('')}</div>`, true)}
+    ${section('Key Intelligence Judgements', `<div class="judgement-grid">${judgementCard('Principal concern', model.narrative.principalJudgement, model.riskAtGlance.overallLevel)}${judgementCard('Operational impact', model.narrative.operationalImpact, model.riskAtGlance.overallLevel)}${judgementCard('Immediate control requirement', model.narrative.requiredControlsSummary, model.goNoGo.recommendation)}</div>`, true)}
+    ${section('Trip Overview', dataQualityStrip(model), true)}
+    ${section('Route and Movement', routeTable(model.routeAndMovement.segments), true)}
+    ${section('Accommodation and Area Safety', hotelSection(model.accommodationSafety.hotels, model.accommodationSafety.note), true)}
+    ${section('Health, Emergency and Consular', `<div class="prose-pair">${proseCard('Health and Medical', model.healthAndMedical)}${proseCard('Emergency and Consular', model.emergencyAndConsular)}</div>`, true)}
+    ${section('Advisories and Relevant Events', advisoryEventList(model.advisories, model.latestEvents), true)}
+    ${section('Intelligence Gaps', missingGroups(model.missingDataGroups), true)}
+    ${section('Mitigation Plan', mitigationPlan(model), true)}
+    ${section('Final Recommendation', `<div class="final-card"><h3>${escapeHtml(model.goNoGo.recommendation)}</h3><p>${escapeHtml(model.narrative.finalRationale)}</p></div>`, true)}
+    ${section('Source Summary', sourceFooter(model.sourceSummary), true)}
   </main>
-  <footer class="footer">Atlas Insight Risk Map and Travel Management | Valid until ${formatDate(model.reportMeta.validUntil)} | This report uses only stored trip, assessment, advisory, event and source records supplied by the platform. Missing items are marked for manual verification.</footer>
+  <footer class="footer">Atlas Insight Risk Map and Travel Management. This visual report uses stored trip, assessment, advisory, event and source records supplied by the platform. Public-map accommodation candidates are not verified hotel recommendations unless separately validated.</footer>
 </div>
 </body>
 </html>`;
