@@ -463,6 +463,29 @@ function missingDataGroups(missingItems: string[]): VisualReportMissingGroup[] {
   })).filter((group) => group.missingItems.length > 0);
 }
 
+function sourceLimitationGroup(input: {
+  advisories: VisualReportListItem[];
+  sourceSummary: VisualReportListItem[];
+  hotels: VisualReportHotel[];
+  routes: VisualReportRouteSegment[];
+}): VisualReportMissingGroup | null {
+  const sourceText = input.sourceSummary.map((item) => `${item.title} ${item.detail}`).join(' ').toLowerCase();
+  const missing: string[] = [];
+  if (!input.advisories.length || input.advisories.some((item) => /limited verified data/i.test(item.detail))) missing.push('official advisories incomplete');
+  if (!/health|who|cdc|outbreak/.test(sourceText)) missing.push('health feed missing');
+  if (!/aviation|airport|flight/.test(sourceText)) missing.push('aviation feed missing');
+  if (input.hotels.length > 0) missing.push('public-map candidate only');
+  if (input.routes.length > 0) missing.push('route not analyst validated');
+  if (!missing.length) return null;
+  return {
+    category: 'Source / data limitations',
+    missingItems: missing,
+    whyItMatters: 'Operational recommendations require clear separation between verified source evidence, public-map candidates and inferred assessment.',
+    whatToAdd: 'Connect missing official feeds, validate route and accommodation choices, and record analyst review before high-confidence operational reliance.',
+    confidenceImpact: 'Manual review remains required where official advisories, health, aviation, route or hotel validation is incomplete.'
+  };
+}
+
 function latestSourceDate(items: SourceSummaryItem[]) {
   const dates = items.map((item) => new Date(item.lastUpdated).getTime()).filter((time) => Number.isFinite(time));
   if (!dates.length) return MISSING;
@@ -618,6 +641,10 @@ export function buildVisualReportModel(
     hotels,
     advisory: firstText([countryProfile.advisoryPosition, advisories[0]?.title], MISSING)
   });
+  const sourceWarnings = sourceLimitationGroup({ advisories, sourceSummary, hotels, routes });
+  const allMissingGroups = sourceWarnings ? [...missingGroups, sourceWarnings] : missingGroups;
+  const finalQuality = dataQuality(rawSourceItems ?? [], confidence, allMissingGroups);
+  const finalDisplayConfidence = cautiousConfidence(confidence, finalQuality);
 
   return {
     reportMeta: {
@@ -638,15 +665,15 @@ export function buildVisualReportModel(
     riskAtGlance: {
       overallScore,
       overallLevel,
-    confidence: displayConfidence,
+    confidence: finalDisplayConfidence,
       badges: [
         { label: 'Overall Risk', value: overallLevel, tone: riskTone(overallLevel) },
         { label: 'Recommendation', value: report.recommendation, tone: riskTone(report.recommendation) },
-        { label: 'Confidence', value: displayConfidence, tone: 'neutral' },
+        { label: 'Confidence', value: finalDisplayConfidence, tone: 'neutral' },
         { label: 'Sources', value: `${sourceSummary.length}`, tone: 'neutral' }
       ],
       keyDrivers,
-      bars: riskBars(overallScore, overallLevel, displayConfidence, keyDrivers, routes)
+      bars: riskBars(overallScore, overallLevel, finalDisplayConfidence, keyDrivers, routes)
     },
     narrative,
     tripOverview: [
@@ -670,7 +697,7 @@ export function buildVisualReportModel(
     advisories: advisories.length ? advisories : [{ title: 'Current advisories', detail: MISSING }],
     latestEvents: latestEvents.length ? latestEvents : [{ title: 'Latest relevant events', detail: MISSING }],
     intelligenceGaps: gaps,
-    missingDataGroups: missingGroups.length ? missingGroups : [{
+    missingDataGroups: allMissingGroups.length ? allMissingGroups : [{
       category: 'Current data position',
       missingItems: ['No material missing inputs identified from the available trip record.'],
       whyItMatters: 'Complete inputs improve the precision of recommendations and reduce manual assumptions.',
@@ -686,7 +713,7 @@ export function buildVisualReportModel(
       hotelSafetyStatus: hotelStatus,
       sourceConfidence: sourceSummary.length ? sourceSummary : [{ title: 'Source confidence', detail: 'Limited verified data available — add source/configuration or manual review.' }]
     },
-    dataQuality: { ...quality, overallDataConfidence: displayConfidence },
+    dataQuality: { ...finalQuality, overallDataConfidence: finalDisplayConfidence },
     goNoGo: {
       recommendation: report.recommendation,
       rationale: extractMarkdownSection(report.markdown, ['Go / No-Go Recommendation', 'Final Recommendation', 'Conclusion'], safeText(assessment.recommendation, MISSING))

@@ -56,7 +56,7 @@ export type ConfidenceScore = {
 export type ProviderCoverageAudit = {
   generatedAt: string;
   providerCoverage: ProviderCoverageItem[];
-  missingFeeds: Array<{ key: string; label: string; domain: string; recommendation: string }>;
+  missingFeeds: Array<{ key: string; label: string; domain: string; recommendation: string; priority: 'High' | 'Medium' | 'Low'; sourceClass: string; implementationDifficulty: 'Low' | 'Medium' | 'High'; expectedConfidenceUplift: string; analystValidationRequired: boolean }>;
   fallbackUsage: Array<{ provider: string; reason: string }>;
   staleSources: Array<{ provider: string; lastRun?: string; reason: string }>;
   countryCoverage: Array<{
@@ -80,7 +80,7 @@ export type ProviderCoverageAudit = {
     healthConfidence: ConfidenceScore;
     operationalConfidence: ConfidenceScore;
   };
-  recommendedNextFeeds: Array<{ domain: string; envVar: string; guidance: string; priority: 'High' | 'Medium' | 'Low' }>;
+  recommendedNextFeeds: Array<{ domain: string; envVar: string; guidance: string; priority: 'High' | 'Medium' | 'Low'; sourceClass: string; implementationDifficulty: 'Low' | 'Medium' | 'High'; expectedConfidenceUplift: string; analystValidationRequired: boolean }>;
   adminReviewRecommendations: Array<{ area: string; recommendation: string; futureStructure: string }>;
 };
 
@@ -129,6 +129,28 @@ function domainForEnv(key: string) {
   if (/DISASTER|USGS|WEATHER|GDACS/.test(key)) return 'Natural hazard and disaster monitoring';
   if (/MAPBOX|OSM|NOMINATIM/.test(key)) return 'Mapping and location intelligence';
   return 'Operational data source';
+}
+
+function feedRecommendationMeta(key: string) {
+  if (/FCDO|STATE|CANADA|SMARTRAVELLER|MFAT/.test(key)) {
+    return { priority: 'High' as const, sourceClass: 'free/public/official', implementationDifficulty: 'Medium' as const, expectedConfidenceUplift: 'High uplift for advisory confidence and report trust.', analystValidationRequired: false };
+  }
+  if (/HEALTH|WHO|CDC/.test(key)) {
+    return { priority: 'High' as const, sourceClass: 'free/public/official or official page extraction', implementationDifficulty: 'Medium' as const, expectedConfidenceUplift: 'High uplift for health and medical confidence.', analystValidationRequired: true };
+  }
+  if (/DISASTER|USGS|WEATHER|GDACS/.test(key)) {
+    return { priority: 'High' as const, sourceClass: 'free/public official plus paid optional weather', implementationDifficulty: 'Medium' as const, expectedConfidenceUplift: 'High uplift for disaster, weather and travel disruption confidence.', analystValidationRequired: false };
+  }
+  if (/AVIATION/.test(key)) {
+    return { priority: 'Medium' as const, sourceClass: 'paid optional/API required', implementationDifficulty: 'High' as const, expectedConfidenceUplift: 'Medium uplift for airport and flight disruption confidence.', analystValidationRequired: true };
+  }
+  if (/RSS|GDELT|NEWS/.test(key)) {
+    return { priority: 'Medium' as const, sourceClass: 'free/public API or curated RSS', implementationDifficulty: 'Medium' as const, expectedConfidenceUplift: 'Medium uplift for incident discovery; confidence depends on relevance filtering.', analystValidationRequired: true };
+  }
+  if (/OFFICIAL_PAGE|EMBASSY|CONSULAR/.test(key)) {
+    return { priority: 'Medium' as const, sourceClass: 'manual/official page extraction', implementationDifficulty: 'Medium' as const, expectedConfidenceUplift: 'Medium uplift for consular and emergency context.', analystValidationRequired: true };
+  }
+  return { priority: 'Low' as const, sourceClass: 'configuration dependent', implementationDifficulty: 'Medium' as const, expectedConfidenceUplift: 'Targeted uplift depending on destination and itinerary.', analystValidationRequired: true };
 }
 
 function scoreConfidence(input: {
@@ -282,27 +304,29 @@ function missingFeeds(coverage: ProviderCoverageItem[]) {
     key: item.key,
     label: item.label,
     domain: domainForEnv(item.key),
-    recommendation: `Configure ${item.key} with a public/free/official feed or approved provider endpoint. Do not use unverified scraped content as authoritative evidence.`
+    recommendation: `Configure ${item.key} with a public/free/official feed or approved provider endpoint. Do not use unverified scraped content as authoritative evidence.`,
+    ...feedRecommendationMeta(item.key)
   })).concat(
     coverage.filter((item) => !item.configured && item.envVars.length > 0).map((item) => ({
       key: item.key,
       label: item.name,
       domain: item.category,
-      recommendation: `Provider requires ${item.envVars.join(', ')} before it can contribute production confidence.`
+      recommendation: `Provider requires ${item.envVars.join(', ')} before it can contribute production confidence.`,
+      ...feedRecommendationMeta(item.envVars[0] ?? item.key)
     }))
-  );
+  ).sort((a, b) => ({ High: 0, Medium: 1, Low: 2 }[a.priority] - { High: 0, Medium: 1, Low: 2 }[b.priority]));
 }
 
 function recommendedNextFeeds() {
   return [
-    { domain: 'Official travel advisories', envVar: 'UK_FCDO_API_URL / US_STATE_ADVISORY_API_URL / CANADA_ADVISORY_API_URL / AU_SMARTRAVELLER_API_URL / NZ_MFAT_ADVISORY_API_URL', guidance: 'Connect official advisory feeds or controlled official-page extraction for destination-specific advisory positions.', priority: 'High' as const },
-    { domain: 'Health and outbreak intelligence', envVar: 'HEALTH_OUTBREAK_FEED_URL', guidance: 'Configure an official WHO, CDC, ECDC or national public-health feed where licensing and access permit.', priority: 'High' as const },
-    { domain: 'Disaster and weather alerts', envVar: 'DISASTER_FEED_URL / USGS_EARTHQUAKE_FEED_URL / WEATHER_API_KEY', guidance: 'Use public GDACS/USGS feeds and a vetted weather alert provider for country and route disruption context.', priority: 'High' as const },
-    { domain: 'Live incident monitoring', envVar: 'NEWS_RSS_FEEDS / GDELT_API_URL', guidance: 'Use curated public RSS and GDELT feeds; require country/coordinate relevance before treating items as trip risk drivers.', priority: 'Medium' as const },
-    { domain: 'Aviation and airport disruption', envVar: 'AVIATIONSTACK_API_KEY', guidance: 'Connect an aviation disruption provider and map alerts to itinerary airports before scoring airport risk.', priority: 'Medium' as const },
-    { domain: 'Embassy and consular context', envVar: 'OFFICIAL_PAGE_URLS', guidance: 'Maintain a controlled list of official embassy/consular pages for extraction and analyst validation.', priority: 'Medium' as const },
-    { domain: 'Sanctions and political instability', envVar: 'OFFICIAL_PAGE_URLS / NEWS_RSS_FEEDS', guidance: 'Use official government sanctions pages and curated public political-risk feeds; add analyst review before client-facing conclusions.', priority: 'Low' as const },
-    { domain: 'Maritime alerts', envVar: 'OFFICIAL_PAGE_URLS / NEWS_RSS_FEEDS', guidance: 'Add official maritime authority or piracy reporting feeds only for trips with maritime exposure.', priority: 'Low' as const }
+    { domain: 'Official travel advisories', envVar: 'UK_FCDO_API_URL / US_STATE_ADVISORY_API_URL / CANADA_ADVISORY_API_URL / AU_SMARTRAVELLER_API_URL / NZ_MFAT_ADVISORY_API_URL', guidance: 'Connect official advisory feeds or controlled official-page extraction for destination-specific advisory positions.', priority: 'High' as const, sourceClass: 'free/public/official', implementationDifficulty: 'Medium' as const, expectedConfidenceUplift: 'High', analystValidationRequired: false },
+    { domain: 'Health and outbreak intelligence', envVar: 'HEALTH_OUTBREAK_FEED_URL', guidance: 'Configure an official WHO, CDC, ECDC or national public-health feed where licensing and access permit.', priority: 'High' as const, sourceClass: 'free/public/official or official page extraction', implementationDifficulty: 'Medium' as const, expectedConfidenceUplift: 'High', analystValidationRequired: true },
+    { domain: 'Disaster and weather alerts', envVar: 'DISASTER_FEED_URL / USGS_EARTHQUAKE_FEED_URL / WEATHER_API_KEY', guidance: 'Use public GDACS/USGS feeds and a vetted weather alert provider for country and route disruption context.', priority: 'High' as const, sourceClass: 'free/public official plus paid optional weather', implementationDifficulty: 'Medium' as const, expectedConfidenceUplift: 'High', analystValidationRequired: false },
+    { domain: 'Live incident monitoring', envVar: 'NEWS_RSS_FEEDS / GDELT_API_URL', guidance: 'Use curated public RSS and GDELT feeds; require country/coordinate relevance before treating items as trip risk drivers.', priority: 'Medium' as const, sourceClass: 'free/public API or curated RSS', implementationDifficulty: 'Medium' as const, expectedConfidenceUplift: 'Medium', analystValidationRequired: true },
+    { domain: 'Aviation and airport disruption', envVar: 'AVIATIONSTACK_API_KEY', guidance: 'Connect an aviation disruption provider and map alerts to itinerary airports before scoring airport risk.', priority: 'Medium' as const, sourceClass: 'paid optional/API required', implementationDifficulty: 'High' as const, expectedConfidenceUplift: 'Medium', analystValidationRequired: true },
+    { domain: 'Embassy and consular context', envVar: 'OFFICIAL_PAGE_URLS', guidance: 'Maintain a controlled list of official embassy/consular pages for extraction and analyst validation.', priority: 'Medium' as const, sourceClass: 'manual/official page extraction', implementationDifficulty: 'Medium' as const, expectedConfidenceUplift: 'Medium', analystValidationRequired: true },
+    { domain: 'Sanctions and political instability', envVar: 'OFFICIAL_PAGE_URLS / NEWS_RSS_FEEDS', guidance: 'Use official government sanctions pages and curated public political-risk feeds; add analyst review before client-facing conclusions.', priority: 'Low' as const, sourceClass: 'manual/official page extraction and curated RSS', implementationDifficulty: 'High' as const, expectedConfidenceUplift: 'Targeted', analystValidationRequired: true },
+    { domain: 'Maritime alerts', envVar: 'OFFICIAL_PAGE_URLS / NEWS_RSS_FEEDS', guidance: 'Add official maritime authority or piracy reporting feeds only for trips with maritime exposure.', priority: 'Low' as const, sourceClass: 'free/public official or paid optional', implementationDifficulty: 'Medium' as const, expectedConfidenceUplift: 'Targeted', analystValidationRequired: true }
   ];
 }
 
