@@ -1,1 +1,43 @@
-{"name":"atlas-insight-risk-map-and-travel-management","version":"0.1.0","private":true,"scripts":{"dev":"next dev","build":"next build","start":"next start","lint":"eslint .","test:e2e":"playwright test","verify:mvp":"node scripts/verify-mvp.mjs"},"dependencies":{"@aws-sdk/client-s3":"^3.723.0","@aws-sdk/s3-request-presigner":"^3.723.0","@neondatabase/serverless":"^0.10.4","@turf/turf":"^7.2.0","d3-geo":"^3.1.1","lucide-react":"^0.468.0","next":"^15.1.3","pg":"^8.13.1","react":"^19.0.0","react-dom":"^19.0.0","topojson-client":"^3.1.0","uuid":"^11.0.3","zod":"^3.24.1"},"devDependencies":{"@playwright/test":"^1.49.1","@types/d3-geo":"^3.1.0","@types/node":"^22.10.2","@types/pg":"^8.11.10","@types/react":"^19.0.2","@types/react-dom":"^19.0.2","@types/topojson-client":"^3.1.5","eslint":"^9.17.0","eslint-config-next":"^15.1.3","typescript":"^5.7.2"}}
+{
+  "name": "atlas-insight-risk-map-and-travel-management",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "test:e2e": "playwright test",
+    "verify:mvp": "node scripts/verify-mvp.mjs",
+    "providers:check": "node scripts/check-provider-config.mjs",
+    "providers:defaults": "node scripts/write-public-provider-defaults.mjs",
+    "bootstrap:countries": "node scripts/bootstrap-country-data.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.723.0",
+    "@aws-sdk/s3-request-presigner": "^3.723.0",
+    "@neondatabase/serverless": "^0.10.4",
+    "@turf/turf": "^7.2.0",
+    "d3-geo": "^3.1.1",
+    "lucide-react": "^0.468.0",
+    "next": "^15.1.3",
+    "pg": "^8.13.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "topojson-client": "^3.1.0",
+    "uuid": "^11.0.3",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@types/d3-geo": "^3.1.0",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@types/topojson-client": "^3.1.5",
+    "eslint": "^9.17.0",
+    "eslint-config-next": "^15.1.3",
+    "typescript": "^5.7.2"
+  }
+}

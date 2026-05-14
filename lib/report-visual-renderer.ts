@@ -103,11 +103,14 @@ function sourceFooter(items: VisualReportListItem[]): string {
 function dataQualityStrip(model: VisualReportModel): string {
   const quality = model.dataQuality;
   return `<div class="quality-strip">
+    ${infoPair('Threat rating', model.riskAtGlance.threatRating)}
+    ${infoPair('Confidence rating', model.riskAtGlance.confidenceRating)}
+    ${infoPair('Data quality', model.riskAtGlance.dataQualityRating)}
+    ${infoPair('Excluded global events', model.riskAtGlance.excludedGlobalEventsCount)}
     ${infoPair('Live sources', quality.liveSourcesCount)}
     ${infoPair('Fallback / missing', quality.fallbackOrMissingSourcesCount)}
     ${infoPair('Latest source', formatDate(quality.latestSourceDate))}
-    ${infoPair('Confidence', quality.overallDataConfidence)}
-    ${infoPair('Manual review', quality.missingCriticalDataCount > 0 ? 'Required' : 'Monitor')}
+    ${infoPair('Manual review', model.riskAtGlance.manualReviewRequirements.length ? 'Required' : 'Monitor')}
   </div>`;
 }
 
@@ -224,8 +227,10 @@ export function renderVisualReportHtml(model: VisualReportModel): string {
         ${infoPair('Destination', overview.Destination ?? model.executiveSnapshot.destination)}
         ${infoPair('Dates', overview.Dates ?? 'Manual verification required')}
         ${infoPair('Purpose', overview.Purpose ?? 'Manual verification required')}
-        ${infoPair('Confidence', model.riskAtGlance.confidence)}
-        ${infoPair('Missing critical inputs', model.dataQuality.missingCriticalDataCount)}
+        ${infoPair('Threat rating', model.riskAtGlance.threatRating)}
+        ${infoPair('Confidence rating', model.riskAtGlance.confidenceRating)}
+        ${infoPair('Data quality', model.riskAtGlance.dataQualityRating)}
+        ${infoPair('Excluded global events', model.riskAtGlance.excludedGlobalEventsCount)}
       </aside>
     </div>
   </header>

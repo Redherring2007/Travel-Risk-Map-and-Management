@@ -1,6 +1,7 @@
 import type { Alert, Trip, TripReport } from './types';
 import type { SourceSummaryItem } from './source-data';
 import type { TripAssessmentRecord } from './trip-assessment';
+import { countExcludedGlobalEvents, filterRelevantAlerts } from './event-relevance';
 
 const MISSING = 'Limited verified data available';
 const MANUAL = 'Manual verification required';
@@ -84,6 +85,11 @@ export type VisualReportModel = {
   riskAtGlance: {
     overallScore: number | null;
     overallLevel: string;
+    threatRating: string;
+    confidenceRating: string;
+    dataQualityRating: string;
+    excludedGlobalEventsCount: number;
+    manualReviewRequirements: string[];
     confidence: string;
     badges: VisualReportBadge[];
     keyDrivers: VisualReportListItem[];
@@ -285,8 +291,10 @@ function levelFromScore(score: unknown): string {
   return 'Low';
 }
 
-function alertItems(items: Alert[] | undefined, limit: number): VisualReportListItem[] {
-  const cleaned = limitList(removeFallbackStatusItems(dedupeByTitleOrSource((items ?? []) as unknown as UnknownRecord[])), limit) as unknown as Alert[];
+function alertItems(items: Alert[] | undefined, limit: number, countryIso2?: string, cityName?: string, routeText?: string): VisualReportListItem[] {
+  const nonFallback = removeFallbackStatusItems(dedupeByTitleOrSource((items ?? []) as unknown as UnknownRecord[])) as unknown as Alert[];
+  const relevant = filterRelevantAlerts(nonFallback, countryIso2, cityName, 45, routeText);
+  const cleaned = limitList(relevant, limit);
   return cleaned.map((item) => ({
     title: safeText(item.title),
     detail: safeText(item.summary),
@@ -508,6 +516,22 @@ function dataQuality(items: SourceSummaryItem[], confidence: string, missingGrou
   };
 }
 
+function dataQualityRating(quality: ReturnType<typeof dataQuality>, confidenceScore: number | null) {
+  if (quality.fallbackOrMissingSourcesCount > 0 || quality.missingCriticalDataCount > 5 || (confidenceScore !== null && confidenceScore < 45)) return 'Manual review required';
+  if (quality.missingCriticalDataCount > 0 || quality.liveSourcesCount < 2 || (confidenceScore !== null && confidenceScore < 70)) return 'Limited';
+  return 'Operationally usable';
+}
+
+function manualReviewRequirements(groups: VisualReportMissingGroup[], excludedGlobalEventsCount: number, quality: ReturnType<typeof dataQuality>) {
+  const requirements = [
+    ...groups.map((group) => `${group.category}: ${group.whatToAdd}`),
+    excludedGlobalEventsCount > 0 ? 'Review excluded global or weak-geography events before relying on them operationally.' : '',
+    quality.fallbackOrMissingSourcesCount > 0 ? 'Replace fallback or unavailable sources with verified provider evidence.' : '',
+    quality.liveSourcesCount < 2 ? 'Confirm at least two live/public source references for high-confidence reliance.' : ''
+  ].filter(Boolean);
+  return Array.from(new Set(requirements)).slice(0, 8);
+}
+
 function cautiousConfidence(confidence: string, quality: ReturnType<typeof dataQuality>) {
   const lower = confidence.toLowerCase();
   if (quality.fallbackOrMissingSourcesCount > 0 || quality.missingCriticalDataCount > 0 || quality.liveSourcesCount < 2) {
@@ -584,13 +608,22 @@ export function buildVisualReportModel(
   const generatedAt = report.createdAt || new Date().toISOString();
   const validUntil = new Date(new Date(generatedAt).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const scoreRaw = assessment.score ?? assessment.overall_score;
+  const threatScoreRaw = assessment.threatScore ?? assessment.threat_score ?? scoreRaw;
+  const confidenceScoreRaw = assessment.confidenceScore ?? assessment.confidence_score;
   const score = Number(scoreRaw);
+  const threatScoreValue = Number(threatScoreRaw);
+  const confidenceScoreValue = Number(confidenceScoreRaw);
   const overallScore = Number.isFinite(score) ? Math.round(score) : null;
+  const threatScore = Number.isFinite(threatScoreValue) ? Math.round(threatScoreValue) : overallScore;
+  const confidenceScore = Number.isFinite(confidenceScoreValue) ? Math.round(confidenceScoreValue) : null;
   const overallLevel = firstText([assessment.level, assessment.overall_level, overallScore === null ? undefined : levelFromScore(overallScore)], MISSING);
+  const threatLevel = firstText([assessment.threatLevel, assessment.threat_level, threatScore === null ? undefined : levelFromScore(threatScore)], overallLevel);
   const confidence = firstText([assessment.confidence, countryProfile.confidence], MISSING);
   const keyDrivers = listItems(asArray(assessment.keyDrivers ?? assessment.key_drivers), 6, 'Key risk driver');
-  const advisories = alertItems(countryProfile.advisories as Alert[] | undefined, 6);
-  const latestEvents = alertItems(countryProfile.events as Alert[] | undefined, 6);
+  const routeText = [trip?.flightDetails, trip?.internalMovements, trip?.meetingsEvents, trip?.accommodation].filter(Boolean).join(' ');
+  const advisories = alertItems(countryProfile.advisories as Alert[] | undefined, 6, primaryLocation?.countryIso2, primaryLocation?.city, routeText);
+  const excludedGlobalEventsCount = countExcludedGlobalEvents((countryProfile.events as Alert[] | undefined) ?? [], primaryLocation?.countryIso2, primaryLocation?.city, routeText);
+  const latestEvents = alertItems(countryProfile.events as Alert[] | undefined, 6, primaryLocation?.countryIso2, primaryLocation?.city, routeText);
   const rawSourceItems = sourcesInput.length ? sourcesInput : assessment.sourceSummary as SourceSummaryItem[] | undefined;
   const sourceSummary = sourceItems(rawSourceItems, 8);
   const routes = routeSegments(assessment);
@@ -645,6 +678,8 @@ export function buildVisualReportModel(
   const allMissingGroups = sourceWarnings ? [...missingGroups, sourceWarnings] : missingGroups;
   const finalQuality = dataQuality(rawSourceItems ?? [], confidence, allMissingGroups);
   const finalDisplayConfidence = cautiousConfidence(confidence, finalQuality);
+  const finalDataQualityRating = dataQualityRating(finalQuality, confidenceScore);
+  const reviewRequirements = manualReviewRequirements(allMissingGroups, excludedGlobalEventsCount, finalQuality);
 
   return {
     reportMeta: {
@@ -665,15 +700,23 @@ export function buildVisualReportModel(
     riskAtGlance: {
       overallScore,
       overallLevel,
-    confidence: finalDisplayConfidence,
+      threatRating: threatScore === null ? threatLevel : `${threatLevel} (${threatScore}/100)`,
+      confidenceRating: confidenceScore === null ? finalDisplayConfidence : `${finalDisplayConfidence} (${confidenceScore}/100)`,
+      dataQualityRating: finalDataQualityRating,
+      excludedGlobalEventsCount,
+      manualReviewRequirements: reviewRequirements,
+      confidence: finalDisplayConfidence,
       badges: [
+        { label: 'Threat Rating', value: threatScore === null ? threatLevel : `${threatLevel} (${threatScore}/100)`, tone: riskTone(threatLevel) },
+        { label: 'Confidence Rating', value: confidenceScore === null ? finalDisplayConfidence : `${finalDisplayConfidence} (${confidenceScore}/100)`, tone: 'neutral' },
+        { label: 'Data Quality', value: finalDataQualityRating, tone: finalDataQualityRating.includes('Manual') ? 'critical' : finalDataQualityRating === 'Limited' ? 'moderate' : 'low' },
+        { label: 'Excluded Global Events', value: `${excludedGlobalEventsCount}`, tone: 'neutral' },
         { label: 'Overall Risk', value: overallLevel, tone: riskTone(overallLevel) },
         { label: 'Recommendation', value: report.recommendation, tone: riskTone(report.recommendation) },
-        { label: 'Confidence', value: finalDisplayConfidence, tone: 'neutral' },
         { label: 'Sources', value: `${sourceSummary.length}`, tone: 'neutral' }
       ],
       keyDrivers,
-      bars: riskBars(overallScore, overallLevel, finalDisplayConfidence, keyDrivers, routes)
+      bars: riskBars(threatScore, threatLevel, finalDisplayConfidence, keyDrivers, routes)
     },
     narrative,
     tripOverview: [
@@ -713,7 +756,7 @@ export function buildVisualReportModel(
       hotelSafetyStatus: hotelStatus,
       sourceConfidence: sourceSummary.length ? sourceSummary : [{ title: 'Source confidence', detail: 'Limited verified data available — add source/configuration or manual review.' }]
     },
-    dataQuality: { ...finalQuality, overallDataConfidence: finalDisplayConfidence },
+    dataQuality: { ...finalQuality, overallDataConfidence: finalDisplayConfidence, recommendedNextInputs: reviewRequirements.length ? reviewRequirements : finalQuality.recommendedNextInputs },
     goNoGo: {
       recommendation: report.recommendation,
       rationale: extractMarkdownSection(report.markdown, ['Go / No-Go Recommendation', 'Final Recommendation', 'Conclusion'], safeText(assessment.recommendation, MISSING))

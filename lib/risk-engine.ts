@@ -1,5 +1,5 @@
 import type { Alert, CityProfile, Confidence, CountryProfile, DataStatus, RiskCategory, RiskLevel, RiskScore, TravellerProfile, Trip } from './types';
-import { filterRelevantAlerts, scoreEventRelevance } from './event-relevance';
+import { filterRelevantAlerts, filterScoringEvents, scoreEventRelevance } from './event-relevance';
 
 export const riskCategories: RiskCategory[] = [
   'security', 'crime', 'political', 'terrorismConflict', 'kidnapExtortion', 'health',
@@ -13,15 +13,20 @@ export const riskCategoryLabels: Record<string, string> = {
 export type AtlasRiskResult = {
   score: number;
   level: RiskLevel;
+  threatScore: number;
+  threatLevel: RiskLevel;
+  confidenceScore: number;
+  confidenceLevel: Confidence;
   recommendation: 'Go' | 'Go With Caution' | 'Avoid';
   confidence: Confidence;
+  dataQualityWarnings: string[];
   keyDrivers: string[];
   sourceSummary: Array<{ source: string; status: string; confidence: string; lastUpdated?: string; records?: number }>;
   missingData: string[];
   freshness: { status: 'fresh' | 'stale' | 'limited' | 'demo'; confidenceModifier: number; notes: string[] };
 };
 
-export type RouteSegmentRisk = { segmentName: string; from?: string; to?: string; score: number; level: RiskLevel; drivers: string[]; mitigation: string };
+export type RouteSegmentRisk = { segmentName: string; from?: string; to?: string; score: number; level: RiskLevel; confidence?: Confidence; drivers: string[]; mitigation: string };
 
 export function riskLevel(value: number): RiskLevel {
   if (value >= 75) return 'Critical';
@@ -83,20 +88,55 @@ export function freshnessConfidence(sourceSummary: AtlasRiskResult['sourceSummar
 }
 
 function confidenceFrom(scoreValue: number, missing: string[], freshness: ReturnType<typeof freshnessConfidence>): Confidence {
-  const penalty = missing.length * 8 - freshness.confidenceModifier;
-  if (penalty > 25 || scoreValue === 0) return 'Low';
-  if (penalty > 8 || freshness.status === 'stale') return 'Medium';
+  const confidenceScore = confidenceScoreFrom(missing, freshness);
+  if (confidenceScore < 45 || scoreValue === 0) return 'Low';
+  if (confidenceScore < 70 || freshness.status === 'stale') return 'Medium';
   return 'High';
+}
+
+function confidenceScoreFrom(missing: string[], freshness: ReturnType<typeof freshnessConfidence>, extraPenalty = 0) {
+  const scoreValue = 82 + freshness.confidenceModifier - missing.length * 8 - extraPenalty;
+  return Math.max(0, Math.min(100, Math.round(scoreValue)));
+}
+
+function confidenceLevelFrom(value: number): Confidence {
+  if (value < 45) return 'Low';
+  if (value < 70) return 'Medium';
+  return 'High';
+}
+
+function dataQualityWarnings(missing: string[], freshness: ReturnType<typeof freshnessConfidence>, excludedEvents = 0) {
+  return [
+    ...freshness.notes,
+    ...missing.map((item) => `Missing ${item} reduces confidence only; it is not treated as threat evidence.`),
+    excludedEvents > 0 ? `${excludedEvents} global, unknown, fallback, or geographically unrelated event record${excludedEvents === 1 ? '' : 's'} excluded from scoring.` : ''
+  ].filter(Boolean);
+}
+
+function directSevereEvidence(events: Alert[], countryIso2?: string, cityName?: string, routeText?: string) {
+  return filterScoringEvents(events, countryIso2, cityName, 65, routeText).some((event) => {
+    const relevance = scoreEventRelevance(event, countryIso2, cityName, routeText);
+    return event.severity === 'Critical' && ['city', 'country'].includes(relevance.geoMatchType) && relevance.relevanceScore >= 65;
+  });
+}
+
+function capCriticalWithoutEvidence(value: number, hasDirectSevereEvidence: boolean) {
+  if (value >= 75 && !hasDirectSevereEvidence) return 74;
+  return value;
+}
+
+function excludedEventCount(events: Alert[], countryIso2?: string, cityName?: string, routeText?: string) {
+  return events.filter((event) => !scoreEventRelevance(event, countryIso2, cityName, routeText).affectsScoring).length;
 }
 
 function eventDrivers(events: Alert[]) {
   return events.filter((event) => ['High', 'Critical'].includes(event.severity)).slice(0, 6).map((event) => `${event.severity}: ${event.title}`);
 }
 
-function eventPressure(events: Alert[], countryIso2?: string, cityName?: string) {
-  const relevant = filterRelevantAlerts(events, countryIso2, cityName, 50).slice(0, 12);
+function eventPressure(events: Alert[], countryIso2?: string, cityName?: string, routeText?: string) {
+  const relevant = filterScoringEvents(events, countryIso2, cityName, 50, routeText).slice(0, 12);
   return Math.min(12, relevant.reduce((total, event) => {
-    const relevance = scoreEventRelevance(event, countryIso2, cityName);
+    const relevance = scoreEventRelevance(event, countryIso2, cityName, routeText);
     return total + (severityToScore(event.severity) / 100) * (relevance.relevanceScore / 100) * 5;
   }, 0));
 }
@@ -108,31 +148,38 @@ export function calculateCountryRiskFromSources(input: { country?: CountryProfil
   const base = Math.max(countryScore, advisoryFloor) + pressure;
   const missing = input.country ? [] : ['country profile'];
   const freshness = freshnessConfidence(input.sourceSummary ?? []);
-  const finalScore = Math.max(0, Math.min(100, Math.round(base)));
+  const hasSevereEvidence = advisoryFloor >= 75 || directSevereEvidence(input.events ?? [], input.country?.iso2);
+  const finalScore = capCriticalWithoutEvidence(Math.max(0, Math.min(100, Math.round(base))), hasSevereEvidence);
   const relevantEvents = filterRelevantAlerts(input.events ?? [], input.country?.iso2, undefined, 50);
-  return { score: finalScore, level: riskLevel(finalScore), recommendation: recommendationFromScore(finalScore), confidence: confidenceFrom(finalScore, missing, freshness), keyDrivers: [...eventDrivers(relevantEvents), advisoryFloor ? 'Government advisory floor applied' : 'Baseline country profile'], sourceSummary: input.sourceSummary ?? [], missingData: missing, freshness };
+  const confidenceScore = confidenceScoreFrom(missing, freshness);
+  const confidenceLevel = confidenceLevelFrom(confidenceScore);
+  const dataQualityWarningsValue = dataQualityWarnings(missing, freshness, excludedEventCount(input.events ?? [], input.country?.iso2));
+  return { score: finalScore, level: riskLevel(finalScore), threatScore: finalScore, threatLevel: riskLevel(finalScore), recommendation: recommendationFromScore(finalScore), confidence: confidenceLevel, confidenceScore, confidenceLevel, dataQualityWarnings: dataQualityWarningsValue, keyDrivers: [...eventDrivers(relevantEvents), advisoryFloor ? 'Government advisory floor applied' : 'Baseline country profile'], sourceSummary: input.sourceSummary ?? [], missingData: missing, freshness };
 }
 
 export function calculateCityRiskFromSources(input: { city?: CityProfile | null; events?: Alert[]; countryRisk?: AtlasRiskResult }) {
   const cityScore = input.city?.risk.find((item) => item.category === 'overall')?.value ?? Math.max(20, (input.countryRisk?.score ?? 25) - 8);
-  const relevant = filterRelevantAlerts(input.events ?? [], input.city?.countryIso2, input.city?.name, 55);
+  const relevant = filterScoringEvents(input.events ?? [], input.city?.countryIso2, input.city?.name, 55);
   const peakEvent = Math.max(0, ...relevant.map((event) => Math.round(severityToScore(event.severity) * (scoreEventRelevance(event, input.city?.countryIso2, input.city?.name).relevanceScore / 100))));
-  const value = Math.max(cityScore, peakEvent);
+  const value = capCriticalWithoutEvidence(Math.max(cityScore, peakEvent), directSevereEvidence(input.events ?? [], input.city?.countryIso2, input.city?.name));
   return { score: value, level: riskLevel(value), drivers: input.city ? [input.city.overview, ...eventDrivers(relevant)].slice(0, 5) : ['Limited verified city data available'] };
 }
 
 export function calculateRouteSegmentRisk(input: { segmentName: string; notes?: string; countryRisk?: AtlasRiskResult; cityRiskScore?: number }): RouteSegmentRisk {
   const text = `${input.segmentName} ${input.notes ?? ''}`.toLowerCase();
-  let value = Math.max(input.cityRiskScore ?? 0, input.countryRisk?.score ?? 20);
+  const hasRouteDetails = Boolean(input.notes?.trim());
+  let value = hasRouteDetails ? Math.max(input.cityRiskScore ?? 0, input.countryRisk?.score ?? 20) : Math.min(45, input.countryRisk?.score ?? 20);
   const drivers: string[] = [];
+  if (!hasRouteDetails) drivers.push('Route details missing; route confidence reduced rather than threat escalated');
   if (/(night|after dark|road|drive|transfer)/.test(text)) { value += 8; drivers.push('Road or after-dark movement exposure'); }
   if (/(airport|border|flight)/.test(text)) { value += 5; drivers.push('Airport/border disruption exposure'); }
   if (/(meeting|event|executive|public)/.test(text)) { value += 6; drivers.push('Profile or event exposure'); }
   value = Math.min(100, Math.round(value));
-  return { segmentName: input.segmentName, score: value, level: riskLevel(value), drivers: drivers.length ? drivers : ['Baseline route exposure'], mitigation: value >= 60 ? 'Use vetted transport, confirm timings, maintain comms and pre-brief alternates.' : 'Use normal movement planning and monitor alerts.' };
+  return { segmentName: input.segmentName, score: value, level: riskLevel(value), confidence: hasRouteDetails ? 'Medium' : 'Low', drivers: drivers.length ? drivers : ['Baseline route exposure'], mitigation: value >= 60 ? 'Use vetted transport, confirm timings, maintain comms and pre-brief alternates.' : 'Use normal movement planning and monitor alerts.' };
 }
 
 export function calculateTripRisk(input: { trip: Trip; country?: CountryProfile | null; city?: CityProfile | null; advisories?: Alert[]; events?: Alert[]; sourceSummary?: AtlasRiskResult['sourceSummary'] }): AtlasRiskResult & { routeRisks: RouteSegmentRisk[]; itineraryRisks: Record<string, unknown> } {
+  const routeContext = [input.trip.flightDetails, input.trip.internalMovements, input.trip.meetingsEvents, input.trip.accommodation].filter(Boolean).join(' ');
   const countryRisk = calculateCountryRiskFromSources({ country: input.country, advisories: input.advisories, events: input.events, sourceSummary: input.sourceSummary });
   const cityRisk = calculateCityRiskFromSources({ city: input.city, events: input.events, countryRisk });
   const traveller = input.trip.traveller;
@@ -159,9 +206,15 @@ export function calculateTripRisk(input: { trip: Trip; country?: CountryProfile 
     calculateRouteSegmentRisk({ segmentName: 'Meetings / events', notes: input.trip.meetingsEvents, countryRisk, cityRiskScore: cityRisk.score })
   ];
   const routePeak = Math.max(...routeRisks.map((item) => item.score));
-  const value = Math.min(100, Math.round(Math.max(countryRisk.score, cityRisk.score, routePeak) + uplift + Math.min(10, missing.length * 1.5)));
+  const threatRaw = Math.round(Math.max(countryRisk.threatScore, cityRisk.score, routePeak) + uplift);
+  const value = capCriticalWithoutEvidence(Math.min(100, threatRaw), directSevereEvidence(input.events ?? [], input.country?.iso2 ?? primary?.countryIso2, input.city?.name ?? primary?.city, routeContext));
   const freshness = countryRisk.freshness;
-  return { score: value, level: riskLevel(value), recommendation: recommendationFromScore(value), confidence: confidenceFrom(value, missing, freshness), keyDrivers: Array.from(new Set([...drivers, ...routeRisks.flatMap((item) => item.drivers)])).slice(0, 10), sourceSummary: input.sourceSummary ?? countryRisk.sourceSummary, missingData: Array.from(new Set(missing)), freshness, routeRisks, itineraryRisks: { country: countryRisk, city: cityRisk, traveller: { highProfile: traveller?.highProfile, travelStyle: traveller?.travelStyle, riskTolerance: traveller?.riskTolerance } } };
+  const uniqueMissing = Array.from(new Set(missing));
+  const routeConfidencePenalty = routeRisks.filter((item) => item.confidence === 'Low').length * 4;
+  const confidenceScore = confidenceScoreFrom(uniqueMissing, freshness, routeConfidencePenalty);
+  const confidenceLevel = confidenceLevelFrom(confidenceScore);
+  const excludedEvents = excludedEventCount(input.events ?? [], input.country?.iso2 ?? primary?.countryIso2, input.city?.name ?? primary?.city, routeContext);
+  return { score: value, level: riskLevel(value), threatScore: value, threatLevel: riskLevel(value), recommendation: recommendationFromScore(value), confidence: confidenceLevel, confidenceScore, confidenceLevel, dataQualityWarnings: dataQualityWarnings(uniqueMissing, freshness, excludedEvents), keyDrivers: Array.from(new Set([...drivers, ...routeRisks.flatMap((item) => item.drivers)])).slice(0, 10), sourceSummary: input.sourceSummary ?? countryRisk.sourceSummary, missingData: uniqueMissing, freshness, routeRisks, itineraryRisks: { country: countryRisk, city: cityRisk, traveller: { highProfile: traveller?.highProfile, travelStyle: traveller?.travelStyle, riskTolerance: traveller?.riskTolerance } } };
 }
 
 export const calculateAtlasTravelRisk = calculateTripRisk;
